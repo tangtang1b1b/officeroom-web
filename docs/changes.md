@@ -1,0 +1,84 @@
+# 變更紀錄
+
+## 2026-11-06：建立 Nuxt 空白 starter
+
+- 需求：依 `C:\work\nuxt-starter-prompt.md` 建立 Nuxt 3 JavaScript starter，含指定共用效果、Tailwind token 與空白首頁。
+- 修改摘要：依規格建立 24 個檔案段落與全部指定目錄；由 `.env.example` 建立空值 `.env`；npm install 產生 lockfile。
+- 影響檔案：規格指定的根目錄檔案及 `assets/`、`components/`、`composables/`、`data/`、`layouts/`、`middleware/`、`pages/`、`plugins/`、`public/`、`server/`、`store/`、`utils/`；另有 `package-lock.json`、`.env`、本紀錄。
+- 驗證結果：Node v24.21.0 / npm 11.19.0；Nuxt 3.21.11，787 個 lockfile Node engine 範圍全數相容；npm install 與 `nuxt prepare` 成功；`npm run build` 輸出 Build complete。
+- 驗證限制：npm install 有 OneDrive 路徑 TAR_ENTRY_ERROR 警告；build 有 Nitro symlink EPERM 與 Nuxt Image sharp binary 警告，但 build 完成。in-app browser 對 localhost 連線逾時，DOM、computed style、console 與 screenshot 未驗證。
+- 未解決事項：browser 驗證 Not Verified；starter 的版本範圍安裝後版本由 npm registry 解析，並非來源 lockfile 重現（來源沒有 lockfile）。
+
+## 2026-11-06：加入重機道路安全遊戲 MVP
+
+- 需求：依核准的黑客松實作計劃，建立單人、無後端的第一人稱山路風險教育遊戲。
+- 修改摘要：新增 Three.js client-side 山路場景、固定步長遊戲狀態與種子情境、鍵盤控制、教學／HUD／暫停／結果／回顧與重玩；使用程序生成幾何，加入 Poly Haven Asphalt 01 1K 道路材質。
+- 影響檔案：`package.json`、`package-lock.json`、`composables/useRoadSafetyGame.js`、`components/game/RoadScene.client.vue`、`pages/index.vue`、`public/textures/asphalt-01-1k.jpg`、`README.md`、`CREDITS.md`、`docs/specs/road-safety-game.md`、`docs/decisions.md`。
+- 驗證結果：待執行 Browser 驗證及 build。
+- 未解決事項：Sketchfab 車輛頁回覆 403、Quaternius 下載頁連線中斷；模型素材尚未取得，車輛維持程序生成幾何。
+
+## 2026-11-06：改善騎乘、車流、碰撞與局後回顧（已核准；驗證中）
+
+- 需求：依 YouTube 視覺參考提升騎乘感、陰天與山路質感、彎道來車壓迫感、碰撞演出與外部視角重播。
+- 修改摘要：鏡頭與車道使用一致側向座標；加入輕微彎道側傾、路面起伏與碰撞失衡/滑行演出；對向箱型車沿道路持續移動並按幾何視線遮蔽決定可見事件；記錄定頻軌跡並於回顧頁提供外部視角重播。調整陰天環境光及霧化，關閉高成本陰影。加入 Poly Haven Asphalt 01 1K normal GL 貼圖及 Tahseen 的 Motorcycle GLB，在外部重播顯示實際機車模型。
+- 影響檔案：`components/game/RoadScene.client.vue`、`composables/useRoadSafetyGame.js`、`pages/index.vue`、`public/textures/road/asphalt_01_nor_gl_1k.jpg`、`public/models/motorcycle/`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`、`CREDITS.md`。
+- 驗證結果：Node 語法檢查與 Vue SFC 編譯前次通過；localhost:3000 確認碰撞結果、事件回顧、場景 canvas 與重播操作 render。viewport 1125×1039；canvas 1125×1039；回顧卡片 620×578，操作列未重疊且在卡片內；console error/warn 為 0。法線貼圖以 1024×1024 JPEG 成功提供。Motorcycle 套件授權檔、glTF 2.0、11 張貼圖與 58,135 triangles 已核對；模型載入與方向已在 replay 畫面確認：實際機車可見並沿道路放置。
+- 未解決事項：卡車模型方向、尺寸與載入待瀏覽器確認；植物、岩石與環境素材尚未匯入。
+
+
+## 2026-11-06：Brave 下載並整合前車與對向卡車（驗證中）
+
+- 需求：直接以 Brave 下載已討論的 Sketchfab 車輛模型並在場景中使用。
+- 修改摘要：取得 F707 Mitsubishi Fuso Ecanter 4K GLB 與 ElectroNick Dump Truck glTF；按包圍盒正規化並接至前車及對向車 render path，成功載入後替換程序占位幾何。更新來源、授權、規格及決策紀錄。
+- 影響檔案：components/game/RoadScene.client.vue、public/models/box-truck/model.glb、public/models/oncoming-truck/、CREDITS.md、docs/specs/road-safety-game.md、docs/decisions.md、docs/changes.md。
+- 驗證結果：Node 語法與 RoadScene/index Vue SFC 編譯通過。localhost:3000 遊戲中見到對向 Dump Truck；外部回放見到機車及 Fuso 車尾，已調整 Fuso 車頭方向。viewport 1125×1039；場景 canvas DOM selector 存在且實際尺寸約 1125.1×1039.4、display:block；browser console error/warn 為 0。
+- 未解決事項：Sketchfab Fuso 的 1K GLB 下載未能完成，使用同頁已下載的 4K 檔；其他植被、岩石與 HDRI 未匯入。本次下載與車輛場景差異已完成視覺核對。
+
+## 2026-11-06：修正騎乘車輛、彎道側傾與盲彎決策
+
+- 需求：處理玩家車輛未更換、轉彎側傾方向錯誤、無操作追撞、缺少選擇、通過車流後遊戲持續及車輛不消失等六項問題。
+- 修改摘要：第一人稱顯示實際機車模型並保留載入失敗的程序座艙；側傾依道路曲率與方向計算；前車減速保留低速；盲彎前顯示跟車距離、前車速度、來車視線和車道位置，提供等待或依可用空間啟用超車；車流通過後結束情境並隱藏已通過車輛。
+- 影響檔案：`composables/useRoadSafetyGame.js`、`components/game/RoadScene.client.vue`、`pages/index.vue`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：瀏覽器同種子超車測試：先切出、再返回，結果「安全通過」，12.0 秒，最小前車距離 23.7m、最小會車距離 26.9m；留在對向車道會碰撞，驗證返回時機影響結果。先前同種子等待測試結果「安全通過」，15.2 秒、最小前車距離 24.8m。決策卡可見四項路況因素與兩個選項。viewport 1304×1039.4；場景 canvas selector 存在、CSS 尺寸 1304×1039.4、display:block；結算卡 selector 存在、尺寸 620×385.3，位置 x=342、y=327，browser screenshot 已檢視，卡片完整位於畫面內且無裁切。截圖中可見第一人稱機車模型。彎道側傾依曲率正負方向程式核對；通過後車輛以相對距離 −8m 隱藏。
+- 未解決事項：console 錯誤/警告及模型資源載入狀態未重新讀取；對向車模型與場景重疊狀況未在每個時點完整核對。
+
+## 2026-11-06：校正第一人稱機車方向、比例與傾斜
+
+- 需求：修正機車模型方向與比例，讓相機位於騎士第一人稱位置，轉向傾斜逐步累積並平順回正。
+- 修改摘要：移除第一人稱 0.42 倍縮放及相機前置整車；機車按約 2.15m 車長顯示並校正前進朝向；相機掛至機車視點 rig，前整流罩、把手及油箱出現在視野下方；轉向傾斜改為隨持續輸入累積並在放開時阻尼回正，並同步呈現於車身；外部回放鏡頭移至不被彎道山壁遮住的一側。
+- 影響檔案：`components/game/RoadScene.client.vue`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：localhost 瀏覽器確認第一人稱道路與前車可見，機車風鏡、儀表、把手、油箱在下方前景；截圖確認機車與卡車沿道路朝前。外部回放視角在相機改掛 rig 後仍可見道路、機車及前車，並調整到不受山壁遮擋的位置。持續左轉時畫面與車身傾角隨輸入改變；方向累積與放開回正公式已核對。場景 canvas selector 存在、CSS 尺寸 1467.4×1039.4、display:block。Node 語法檢查及 RoadScene、index Vue SFC 編譯通過。
+- 未解決事項：本次未重新取得 console 錯誤/警告計數或模型資源傳輸資訊；沒有執行測試或 build。
+
+## 2026-11-06：依騎乘參考圖調整座艙構圖與傾斜
+
+- 需求：直行視角呈現風鏡、後照鏡、儀表與油箱；轉彎時左轉左傾、右轉右傾；車款不必相同，需保留道路、車道與前車的比例線索。
+- 修改摘要：在機車騎士視點 rig 加入左右後照鏡，使其隨車身傾斜；保持既有風鏡、儀表與油箱在下方前景，保留中央道路與前車視線。外部回放鏡頭保持在能看清道路的位置。後續使用者要求移除自製後照鏡，修正記錄見下一筆。
+- 影響檔案：`components/game/RoadScene.client.vue`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：localhost 瀏覽器截圖確認直行畫面可見左右後照鏡、座艙、油箱、前車與車道線；實際輸入 A 與 D 後，車身、鏡體及視野分別朝左、右傾斜。場景 canvas selector 命中 1 個，尺寸 1467.4×1039.4、`display:block`；模型已在瀏覽器畫面載入。
+- 未解決事項：場景尚無實際環境反射貼圖，後照鏡以簡化灰色鏡面呈現；未重新讀取 browser console。未執行 build 或測試。
+
+## 2026-11-06：移除自製後照鏡並限制左右橫移
+
+- 需求：右轉不可把視角推入路肩山壁；現有機車模型沒有後照鏡時，不要人工補造。
+- 修改摘要：移除正式模型及座艙 fallback 的程序後照鏡；左右移動速度由 3.4m/s 降為 2.4m/s，橫移範圍限制為 ±3.2m，以保留切換車道並避免快速偏到路肩。原有機車本體與相機左右傾斜保留。
+- 影響檔案：`components/game/RoadScene.client.vue`、`composables/useRoadSafetyGame.js`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：localhost 瀏覽器截圖確認已無自製鏡體，座艙與油箱仍可見；右轉測試中保留道路、前車與車道線，沒有將畫面推到路肩山壁；A/D 輸入分別使車身與畫面左右傾斜。Canvas selector 命中 1 個，CSS 尺寸 1467.4×1039.4、`display:block`。Node 語法檢查及 RoadScene、index Vue SFC 編譯通過。
+- 未解決事項：未重新讀取 browser console；未執行 build 或測試。
+
+## 2026-11-06：修正左右傾斜軸與相機轉向
+
+- 需求：左轉時模型左傾、視角微轉左；右轉時模型右傾、視角微轉右。使用者指出原有左右傾斜方向與呈現仍錯誤。
+- 修改摘要：把車身模型的前進朝向放入獨立傾斜 pivot，避免 yaw 與 roll 共用一組旋轉；相機以小幅平滑 yaw 朝轉向方向移動，取消跟著車身角度翻滾。
+- 影響檔案：`components/game/RoadScene.client.vue`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：localhost 瀏覽器實際按 A 與 D，確認視角分別微轉左、右，車身前景分別朝相反方向傾斜，地平線保持穩定；Node 語法與 RoadScene Vue SFC 編譯通過。
+- 未解決事項：未重新讀取 browser console；未執行 build 或測試。
+
+## 2026-11-06：校正對向卡車車頭朝向
+
+- 需求：對向來車不可車尾朝前、呈現倒車接近。
+- 修改摘要：對向卡車模型載入時校正 180 度朝向，保持既有資產與尺度。
+- 影響檔案：`components/game/RoadScene.client.vue`、`docs/specs/road-safety-game.md`、`docs/decisions.md`、`docs/changes.md`。
+- 驗證結果：localhost 外部視角重播至會車時截圖確認對向車車頭朝向機車迎面接近；`.road-scene canvas` selector 命中 1 個，computed `display:block`，尺寸 1467.4×1039.4；截圖中模型已載入且車頭可辨識。重新讀取修改程式與差異確認只增加對向模型 180 度 heading；未執行 build 或測試。
+- 未解決事項：場景大型岩壁等既有環境模型外觀不在本次朝向修正範圍。
+

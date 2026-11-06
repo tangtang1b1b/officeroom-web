@@ -1,0 +1,117 @@
+@layer utilities {
+  /* 文型設定 */
+
+  /* 中文 */
+  /* 主要標題 */
+  .text-title {
+    @apply text-2xl;
+    @apply md:text-3xl;
+    @apply lg:text-5xl;
+  }
+  .text-symptom {
+    @apply text-[12px];
+    @apply md:text-[18px];
+    @apply lg:text-[24px];
+  }
+  .text-feature {
+    @apply text-[16px];
+    @apply md:text-[20px];
+    @apply lg:text-[26px];
+  }
+  .text-feature-desc {
+    @apply text-[12px];
+    @apply md:text-[17px];
+  }
+  .text-btn {
+    @apply font-medium;
+    @apply text-[16px];
+    @apply md:text-[22px];
+    @apply lg:text-[28px];
+  }
+}
+
+/* Editor / post content 樣式，套用到 v-html 的內容 */
+.post-content,
+.post-content * {
+  font-family: 'Noto Sans TC', sans-serif !important;
+}
+.post-content {
+  color: #333333;
+  line-height: 1.8;
+  font-size: 16px;
+}
+.post-content h1 {
+  font-size: 2rem;
+  line-height: 1.2;
+  font-weight: 700;
+  margin: 1.25rem 0 0.75rem;
+}
+.post-content h2 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  margin: 1rem 0 0.6rem;
+}
+.post-content h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0.9rem 0 0.5rem;
+}
+.post-content p {
+  margin: 0.6rem 0;
+}
+.post-content a {
+  color: #1f6feb;
+  text-decoration: underline;
+}
+.post-content ul,
+.post-content ol {
+  margin: 0.6rem 0 0.6rem 1.25rem;
+}
+.post-content ul { list-style-type: disc; }
+.post-content ol {
+  list-style-position: inside;
+  list-style-type: decimal;
+}
+.post-content li {
+  margin: 0.35rem 0 !important;
+  display: list-item !important;
+}
+.post-content blockquote {
+  border-left: 4px solid #e5e7eb;
+  padding: 0.5rem 1rem;
+  color: #555;
+  background: #fafafa;
+  margin: 0.6rem 0;
+}
+.post-content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.6rem 0;
+}
+.post-content pre {
+  background: #0f172a;
+  color: #e6eef8;
+  padding: 0.75rem;
+  overflow: auto;
+  border-radius: 6px;
+  margin: 0.6rem 0;
+}
+.post-content code {
+  background: #f3f4f6;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+}
+.post-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8rem 0;
+}
+.post-content th,
+.post-content td {
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem;
+}
+.post-content figure { margin: 0.6rem 0; }
+.post-content figcaption { font-size: 0.85rem; color: #666; }

@@ -1,0 +1,21 @@
+@import url('./typography.css');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全域字體設定 */
+html, body {
+  /* font-family: "Noto Sans TC", sans-serif; */
+}
+
+.dev-red{
+  outline: solid 1px red;
+}
+
+.dev-blue{
+  outline: solid 1px blue;
+}
+
+.dev-green{
+  outline: solid 1px green;
+}
