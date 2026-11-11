@@ -1,5 +1,5 @@
 import { PLAYER, SPAWN_POINTS } from '~/shared/layout.js'
-import { isBlocked } from '~/shared/collision.js'
+import { moveCircle } from '~/shared/collision.js'
 
 const MOUSE_SENSITIVITY = 0.0035
 const MAX_PITCH = 1.45
@@ -67,9 +67,10 @@ export const usePlayerControls = (element) => {
     const cos = Math.cos(state.yaw)
     const dx = ((-sin * forward + cos * strafe) / length) * speed * dt
     const dz = ((-cos * forward - sin * strafe) / length) * speed * dt
-    // 軸分離碰撞,貼牆時可沿牆滑動
-    if (!isBlocked(state.x + dx, state.z)) state.x += dx
-    if (!isBlocked(state.x, state.z + dz)) state.z += dz
+    // 圓形碰撞:被擋時沿障礙物表面滑動(含斜牆與方塊轉角)
+    const next = moveCircle(state.x, state.z, dx, dz)
+    state.x = next.x
+    state.z = next.z
     state.speed = speed
   }
 

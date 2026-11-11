@@ -216,6 +216,8 @@ export const FIXTURES = [
 
 // 會議室面向開放區的隔牆是落地玻璃(x ≤ 0.4 的部分),門口缺口有玻璃門
 export const GLASS_WALL = { z: 3.4, x0: -7.2, x1: -2.1, door: { x0: -8.4, x1: -7.2 } }
+// 玻璃門扇(開 90° 貼著門框、朝會議室內):畫面上看得到的東西都要有碰撞。鉸鏈在門缺口 x0 側。
+export const DOOR_LEAF = { id: 'door-leaf', x: GLASS_WALL.door.x0 + 0.02, z: GLASS_WALL.z + 0.55, w: 0.06, d: 1.1, h: 2.2 }
 // 入口區:水泥色地板;正對玻璃門的牆(wall-e)是深色背牆,掛公司名稱
 export const ENTRANCE_ZONE = { x0: 2.7, x1: 5.5, z0: 3.4, z1: 7.5 }
 
@@ -248,6 +250,7 @@ const box = (id, x, z, w, d, minY, maxY) => ({
 // 所有實心碰撞方塊;外牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
 export const COLLIDERS = [
   ...WALLS.map((w) => box(w.id, w.x, w.z, w.w, w.d, 0, ROOM.height)),
+  box(DOOR_LEAF.id, DOOR_LEAF.x, DOOR_LEAF.z, DOOR_LEAF.w, DOOR_LEAF.d, 0, DOOR_LEAF.h),
   ...FIXTURES.map((f) => {
     const fp = footprint(f, f.w, f.d)
     return box(f.id, f.x, f.z, fp.w, fp.d, 0, f.h)

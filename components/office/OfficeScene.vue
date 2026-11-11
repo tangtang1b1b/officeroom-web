@@ -1,10 +1,10 @@
 <script setup>
 import * as THREE from 'three'
 import { createRemotePlayers } from '~/utils/office/remotePlayers.js'
-import { createPaint } from '~/utils/office/paint.js'
+import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
-import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW } from '~/shared/layout.js'
+import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
@@ -334,8 +334,8 @@ const buildPartitions = () => {
   addBox(scene, [door.x1 - door.x0, H - 2.3, 0.05], [(door.x0 + door.x1) / 2, (2.3 + H) / 2, GLASS_WALL.z], COLOR.glass, glassExtra)
   const leaf = new THREE.Group()
   leaf.position.set(door.x0 + 0.02, 0, GLASS_WALL.z)
-  leaf.rotation.y = -1.35
-  addBox(leaf, [1.1, 2.2, 0.03], [0.55, 1.1, 0], COLOR.glass, glassExtra)
+  leaf.rotation.y = -Math.PI / 2 // 門扇開 90°,貼著門框朝 +z(會議室內)
+  addBox(leaf, [DOOR_LEAF.d, DOOR_LEAF.h, 0.03], [DOOR_LEAF.d / 2, DOOR_LEAF.h / 2, 0], COLOR.glass, glassExtra)
   addBox(leaf, [0.05, 0.4, 0.07], [1.05, 1.0, 0], 0x8d9399) // 把手
   scene.add(leaf)
 }
@@ -601,7 +601,7 @@ onMounted(() => {
       const onHit = () => {
         if (disposed) return
         if (msg.targetId !== store.myId) paint.addSplat(msg)
-        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color) }
+        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(PAINT_RED) }
       }
       if (origin) paint.addProjectile(origin, msg.pos, msg.color, onHit)
       else onHit()

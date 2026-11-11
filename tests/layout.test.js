@@ -12,6 +12,10 @@ describe('office layout', () => {
     expect(isBlocked(-1, 3.4)).toBe(true) // 牆面
     for (const x of [-7.8, 0.5]) for (const z of [2.65, 4.2]) expect(isBlocked(x, z)).toBe(false)
   })
+  it('glass door leaf is solid but the doorway stays open', () => {
+    expect(isBlocked(-8.38, 4.0)).toBe(true) // 門扇
+    for (const z of [2.65, 3.4, 4.2]) expect(isBlocked(-7.7, z)).toBe(false)
+  })
   it('has a single chest-height cabinet and three big lounge chairs on its wall side', () => {
     const shelves = FIXTURES.filter((x) => x.kind === 'shelf')
     expect(shelves).toHaveLength(1)
@@ -118,5 +122,37 @@ describe('office layout', () => {
   })
   it('keeps 10 chairs', () => {
     expect(CHAIRS).toHaveLength(10)
+  })
+})
+
+describe('circle movement', () => {
+  it('slides along the slanted wall instead of sticking', async () => {
+    const { moveCircle } = await import('../shared/collision.js')
+    // 貼著斜牆往 -x 走(牆往 +z 抬高),同時往牆的方向擠
+    let p = { x: 3, z: minZAt(3) + 0.3 }
+    for (let i = 0; i < 80; i++) p = moveCircle(p.x, p.z, -0.05, -0.02)
+    expect(p.x).toBeLessThan(0) // 往前走了 4m 左右而沒有卡住
+    expect(isBlocked(p.x, p.z)).toBe(false)
+  })
+  it('slides around a box corner and never ends up inside', async () => {
+    const { moveCircle } = await import('../shared/collision.js')
+    const shelf = FIXTURES.find((f) => f.id === 'shelf-a')
+    let p = { x: shelf.x + shelf.w / 2 + 1, z: shelf.z }
+    for (let i = 0; i < 60; i++) {
+      p = moveCircle(p.x, p.z, -0.05, 0.03)
+      expect(isBlocked(p.x, p.z, PLAYER.radius - 0.01)).toBe(false)
+    }
+  })
+  it('random walks never penetrate colliders', async () => {
+    const { moveCircle } = await import('../shared/collision.js')
+    let seed = 7
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5
+    for (const start of SPAWN_POINTS) {
+      let p = { ...start }
+      for (let i = 0; i < 400; i++) {
+        p = moveCircle(p.x, p.z, rnd() * 0.16, rnd() * 0.16)
+        expect(isBlocked(p.x, p.z, PLAYER.radius - 0.01)).toBe(false)
+      }
+    }
   })
 })

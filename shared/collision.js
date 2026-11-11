@@ -1,5 +1,5 @@
 // 2D 碰撞(俯視 xz)。前後端共用:圓形玩家 vs ROOM 邊界與 COLLIDERS 的 AABB。
-import { ROOM, PLAYER, COLLIDERS, minZAt } from './layout.js'
+import { ROOM, PLAYER, COLLIDERS, minZAt, WALL_SLANT } from './layout.js'
 
 const circleHitsBox = (x, z, radius, box) => {
   const nearestX = Math.max(box.min[0], Math.min(x, box.max[0]))
@@ -15,4 +15,58 @@ export const isBlocked = (x, z, radius = PLAYER.radius) => {
   // -z 側是斜牆:以圓心 x 處的牆線為準,斜率約 0.2,距離換算乘上 1/cos
   if (z - radius * 1.02 < minZAt(x)) return true
   return COLLIDERS.some((box) => circleHitsBox(x, z, radius, box))
+}
+
+// 圓形角色的移動:先走完整位移,若被擋則把圓心從重疊的障礙物「推出」(沿最近點法線),
+// 讓角色能沿牆、沿斜牆與方塊轉角順暢滑動,不會像逐軸判斷那樣卡在斜牆或轉角上。
+const SLANT_NORM = Math.sqrt(1 + ((WALL_SLANT.z1 - WALL_SLANT.z0) / (WALL_SLANT.x1 - WALL_SLANT.x0)) ** 2)
+const SLANT_SLOPE = (WALL_SLANT.z1 - WALL_SLANT.z0) / (WALL_SLANT.x1 - WALL_SLANT.x0)
+const EPS = 0.002
+
+const pushOut = (pos, radius) => {
+  let moved = false
+  if (pos.x - radius < ROOM.minX) { pos.x = ROOM.minX + radius; moved = true }
+  if (pos.x + radius > ROOM.maxX) { pos.x = ROOM.maxX - radius; moved = true }
+  if (pos.z + radius > ROOM.maxZ) { pos.z = ROOM.maxZ - radius; moved = true }
+  // 斜牆:有號距離 d = (z - minZAt(x)) / SLANT_NORM,法線 (-slope, 1) / SLANT_NORM
+  const d = (pos.z - minZAt(pos.x)) / SLANT_NORM
+  if (d < radius * 1.0) {
+    const push = radius - d + EPS
+    pos.x += (-SLANT_SLOPE / SLANT_NORM) * push
+    pos.z += (1 / SLANT_NORM) * push
+    moved = true
+  }
+  for (const box of COLLIDERS) {
+    const nx = Math.max(box.min[0], Math.min(pos.x, box.max[0]))
+    const nz = Math.max(box.min[2], Math.min(pos.z, box.max[2]))
+    const dx = pos.x - nx
+    const dz = pos.z - nz
+    const dist2 = dx * dx + dz * dz
+    if (dist2 >= radius * radius) continue
+    moved = true
+    if (dist2 > 1e-10) {
+      const dist = Math.sqrt(dist2)
+      const push = radius - dist + EPS
+      pos.x += (dx / dist) * push
+      pos.z += (dz / dist) * push
+    } else {
+      // 圓心在方塊內:往最近的一面推出
+      const exits = [
+        [pos.x - box.min[0] + radius, -1, 0],
+        [box.max[0] - pos.x + radius, 1, 0],
+        [pos.z - box.min[2] + radius, 0, -1],
+        [box.max[2] - pos.z + radius, 0, 1],
+      ].sort((a, b) => a[0] - b[0])[0]
+      pos.x += exits[1] * (exits[0] + EPS)
+      pos.z += exits[2] * (exits[0] + EPS)
+    }
+  }
+  return moved
+}
+
+export const moveCircle = (x, z, dx, dz, radius = PLAYER.radius) => {
+  const pos = { x: x + dx, z: z + dz }
+  for (let i = 0; i < 6 && pushOut(pos, radius); i++);
+  // 推不出可行位置(極端夾角)就維持原地,避免穿牆
+  return isBlocked(pos.x, pos.z, radius) ? { x, z } : pos
 }

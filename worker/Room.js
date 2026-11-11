@@ -4,7 +4,7 @@
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
 import { SPAWN_POINTS } from '../shared/layout.js'
-import { MAX_PLAYERS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
+import { MAX_PLAYERS, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
 import {
   checkAdmission,
@@ -26,7 +26,7 @@ import {
   pickSpawnPoint,
 } from './rules.js'
 
-const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
+const COLORS = PLAYER_COLORS
 const BROADCAST_MS = 50
 const CORRECT_MIN_INTERVAL_MS = 100
 const MAX_SHOT_DIST = 25

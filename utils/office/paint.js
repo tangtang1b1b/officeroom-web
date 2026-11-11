@@ -4,6 +4,7 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 const MAX_SPLATS = 150
 const TRACER_LIFE = 0.12
 const FORWARD = new THREE.Vector3(0, 0, 1)
+export const PAINT_RED = 0xd91e1e // 漆彈一律是紅色(不跟玩家顏色)
 const BALL_SPEED = 45 // 漆彈飛行速度(公尺/秒)
 const VARIANTS = 4
 
@@ -203,14 +204,14 @@ export const createPaint = (scene, getHost) => {
     const onBody = msg.targetId && host ? locateOnBody(msg, host) : null
     const pos = onBody ? onBody.point.toArray() : msg.pos
     const normal = onBody ? onBody.normal.toArray() : msg.normal
-    const material = materialFor(msg.color)
+    const material = materialFor(PAINT_RED)
     const n = new THREE.Vector3(...normal).normalize()
     // 往外推一點,讓投影盒中心落在表面外側而非剛好貼面
     const p = [pos[0] + n.x * 0.005, pos[1] + n.y * 0.005, pos[2] + n.z * 0.005]
 
     // 身體方塊較小,斑點縮小
-    const scale = onBody ? (onBody.mesh.userData.part === 'torso' ? 0.7 : 0.45) : 1
-    const sizes = [(0.2 + Math.random() * 0.1) * scale] // 水滴已畫在貼圖內
+    const scale = onBody ? (onBody.mesh.userData.part === 'torso' ? 1.05 : 0.7) : 1
+    const sizes = [(0.3 + Math.random() * 0.15) * scale] // 水滴已畫在貼圖內
 
     let targets
     let attach = true
@@ -244,7 +245,7 @@ export const createPaint = (scene, getHost) => {
   const balls = []
   const ballGeometry = new THREE.SphereGeometry(0.035, 10, 8)
   const addProjectile = (origin, end, color, onHit) => {
-    const mesh = new THREE.Mesh(ballGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(color) }))
+    const mesh = new THREE.Mesh(ballGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(PAINT_RED) }))
     const from = new THREE.Vector3(...origin)
     const to = new THREE.Vector3(...end)
     mesh.position.copy(from)
