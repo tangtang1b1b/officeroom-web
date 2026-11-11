@@ -348,7 +348,7 @@ const resetPointer = () => {
   pointerInside = false
 }
 
-// 瀏覽器規定 Esc 一定會解除滑鼠鎖定,無法攔截;所以在聊天面板沒開時隱藏游標,並讓任何移動鍵立刻重新鎖定
+// 瀏覽器規定 Esc 一定會解除滑鼠鎖定,無法攔截;游標照常顯示,並讓任何移動鍵立刻重新鎖定
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 const onKeyRelock = (event) => {
   if (controls.locked.value || chatBox.value?.isOpen) return
@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative h-screen w-screen overflow-hidden bg-black">
-    <div ref="host" class="absolute inset-0" :class="!locked && !chatBox?.isOpen ? 'cursor-none' : hovering ? 'cursor-pointer' : ''"></div>
+    <div ref="host" class="absolute inset-0" :class="hovering ? 'cursor-pointer' : ''"></div>
 
     <div v-if="locked && !hovering" class="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"></div>
     <!-- 準心或游標指到別的玩家時,在游標位置顯示瞄準圈 -->
