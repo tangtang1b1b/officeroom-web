@@ -1,10 +1,10 @@
-name = "office-paintball"
+name = "officeroom"
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
 [vars]
 # 部署前填入 Vercel 正式網址,逗號分隔,例如 "https://xxx.vercel.app"
-ALLOWED_ORIGINS = "https://streetcare-kohl.vercel.app"
+ALLOWED_ORIGINS = "https://officeroom-web.vercel.app"
 
 [[durable_objects.bindings]]
 name = "ROOM"

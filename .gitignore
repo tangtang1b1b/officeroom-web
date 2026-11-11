@@ -25,3 +25,6 @@ logs
 
 # Wrangler / Miniflare 本機暫存
 .wrangler
+
+.vercel
+.env*

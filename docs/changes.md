@@ -107,6 +107,25 @@
 ## 2026-11-11：改為 Vercel 前端 + Cloudflare Worker，並部署 Worker
 
 - 修改摘要：前端部署到 Vercel(`vercel.json`、`nitro.preset: 'static'`)，遊戲伺服器獨立部署到 Cloudflare Worker；`WS_URL` 正式環境生效；Worker 新增 `ALLOWED_ORIGINS`(完整 origin 清單)，移除靜態資源，`/` 回健康檢查文字。
-- 部署結果：Worker 網址 `https://office-paintball.streetcare.workers.dev`(帳號 workers.dev 子網域改為 `streetcare`)，`ALLOWED_ORIGINS=https://streetcare-kohl.vercel.app`。
+- 部署結果：Worker 網址 `https://office-paintball.streetcare.workers.dev`(帳號 workers.dev 子網域改為 `streetcare`)，`ALLOWED_ORIGINS=https://dangeride.vercel.app`(先前誤填成另一個專案的網址,已更正)。
 - 驗證結果：Vitest 59 通過；線上 `GET /` 回 200；以 `ws` 客戶端實測：該 Vercel Origin 可連線並收到 welcome，其他 Origin 與無 Origin 皆回 403。
 - 未解決事項：Vercel 專案環境變數 `WS_URL=wss://office-paintball.streetcare.workers.dev/ws` 尚待設定，設定後需重新部署前端；前端在 Vercel 的實際建置與跨網域連線尚未驗證；預覽網址不在允許清單內。
+
+## 2026-11-11：前端部署到 Vercel
+
+- 部署方式：以 Vercel CLI 建立專案 `dangeride`(帳號 `tangtang1b1b`，團隊 `eric's projects`)並 `vercel deploy --prod`；專案自動連結 GitHub `tangtang1b1b/riding-think`，之後 push 會自動部署。Production 環境變數 `WS_URL=wss://office-paintball.streetcare.workers.dev/ws`。
+- 網址：`https://dangeride.vercel.app`；Worker `ALLOWED_ORIGINS` 已改為此網址並重新部署。
+- 驗證結果：正式網站回 200 且輸出含 Worker 位址；`ws` 實測此 Origin 連線成功，舊網址、其他來源與無 Origin 皆 403；在瀏覽器開正式網站輸入暱稱後成功進入辦公室並連上伺服器(線上 1 / 10)。
+- 未解決事項：頁面標題仍是「NUXT模板」(Vercel 未設定 `APP_TITLE` 等環境變數)；預覽網址不在 Worker 允許清單內；未實測多人同時在正式站互動。
+
+## 2026-11-11：專案改名為 officeroom
+
+- 修改摘要：Vercel 專案 `dangeride` 改名為 `officeroom`；Cloudflare Worker 由 `office-paintball` 改名為 `officeroom`(新網址 `https://officeroom.streetcare.workers.dev`，舊 Worker 已刪除)；`package.json` 與 lockfile 的名稱改為 `officeroom`；Production 的 `WS_URL` 改指向 `wss://officeroom.streetcare.workers.dev/ws` 並重新部署前端。
+- 驗證結果：Vitest 59 通過；新 Worker `/` 回 `officeroom ok`；`ws` 實測 `https://dangeride.vercel.app` 可連、其他來源與無 Origin 皆 403；在瀏覽器開正式網站進入辦公室並連上新 Worker(線上 1 / 10)；舊 Worker 回 404。
+- 限制：Vercel 改專案名稱不會改 `*.vercel.app` 網址，正式網址仍是 `https://dangeride.vercel.app`(`officeroom.vercel.app` 已被他人占用)。GitHub 倉庫仍叫 `riding-think`，本機資料夾仍叫 `dangeride`，尚未更名。
+
+## 2026-11-11：正式網址換成 officeroom-web.vercel.app
+
+- 修改摘要：以 `vercel domains add` 將 `officeroom-web.vercel.app` 加入專案 `officeroom`；Worker `ALLOWED_ORIGINS` 改為 `https://officeroom-web.vercel.app` 並重新部署。
+- 驗證結果：新網址回 200 且含新 Worker 位址；`ws` 實測新 Origin 可連，舊網址 `dangeride.vercel.app`、其他來源與無 Origin 皆 403；在瀏覽器開新網址輸入暱稱後成功進入辦公室並連線(線上 1 / 10)。
+- 舊網域 `dangeride.vercel.app` 已以 `vercel alias rm` 移除(現回 404)。

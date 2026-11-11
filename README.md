@@ -84,7 +84,7 @@ GOOGLE_SITE_VERIFICATION=
 
 1. **遊戲伺服器(Cloudflare Worker)**
    - `wrangler.toml` 的 `ALLOWED_ORIGINS` 填入 Vercel 正式網址(完整 origin,逗號分隔,例如 `https://xxx.vercel.app`)。
-   - `npx wrangler login`(一次),再 `npm run worker:deploy`,取得 `https://<name>.<account>.workers.dev`(目前:`https://office-paintball.streetcare.workers.dev`)。
+   - `npx wrangler login`(一次),再 `npm run worker:deploy`,取得 `https://<name>.<account>.workers.dev`(目前:`https://officeroom.streetcare.workers.dev`)。
 2. **前端(Vercel)**
    - 在 Vercel 專案環境變數新增 `WS_URL=wss://<name>.<account>.workers.dev/ws`(建置時寫入輸出檔,改了要重新部署)。
    - Vercel 依 `vercel.json` 執行 `npm run generate`,輸出 `.output/public`。push 後自動部署。
