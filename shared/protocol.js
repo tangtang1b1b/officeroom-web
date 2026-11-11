@@ -29,7 +29,7 @@ export const S2C = {
 // player_leave{ type, id }
 // snapshot    { type, players:[Player], objects:[Obj] }  objects 僅含醒著/剛睡著/狀態改變者
 // chat        { type, from:name, text }
-// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, objectId? }
+// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, part?, objectId? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
 // correct     { type, pos:[x,y,z] }
 // error       { type, error }
 // Obj = { id, x, z, yaw, state:'up'|'down' }(x/z/yaw 四捨五入到 3 位)

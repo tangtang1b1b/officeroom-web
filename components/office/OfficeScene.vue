@@ -50,16 +50,21 @@ let eyeHeight = PLAYER.eyeHeight.stand
 const disposables = []
 
 const COLOR = {
-  floor: 0xd8c3a0,
-  wall: 0xf4f2ee,
-  ceiling: 0xe9e7e2,
-  beam: 0xdedbd5,
+  floor: 0xc9b79c,
+  wall: 0xf7f5f0,
+  ceiling: 0xeeeae0,
+  beam: 0xe6e2d8,
+  tube: 0xf2f2ee,
   deskTop: 0xf7f6f2,
   yellow: 0xf2b705,
   chair: 0x9ea4aa,
   frame: 0x1c1c1c,
   glass: 0x9fd1e8,
   box: 0xc49a6c,
+  brick: 0x9c4a3c,
+  facadeWindow: 0x2b2f36,
+  leaf: 0x6e9a5b,
+  bark: 0x6b4a2e,
 }
 
 const addBox = (parent, size, position, color, extra = {}) => {
@@ -80,6 +85,7 @@ const buildRoom = () => {
   const t = 0.2 // 牆厚
 
   addBox(scene, [width, 0.1, depth], [cx, -0.05, cz], COLOR.floor)
+  addBox(scene, [90, 0.1, 90], [cx, -0.06, cz], 0x8fa383) // 窗外地面,避免樹與磚牆懸空
   addBox(scene, [width, 0.1, depth], [cx, ROOM.height + 0.05, cz], COLOR.ceiling)
 
   // 天花板樑
@@ -92,6 +98,10 @@ const buildRoom = () => {
       emissive: 0xffffff,
       emissiveIntensity: 0.6,
     })
+  }
+  // 白色方管:沿 x 方向,貼天花板下方
+  for (const z of [-3.5, 3.5]) {
+    addBox(scene, [width - 1, 0.14, 0.14], [cx, ROOM.height - 0.1, z], COLOR.tube)
   }
 
   // 帶狀窗:下牆、上牆、玻璃與窗框
@@ -123,6 +133,35 @@ const buildRoom = () => {
   // 實心牆
   addBox(scene, [width, ROOM.height, t], [cx, ROOM.height / 2, ROOM.maxZ + t / 2], COLOR.wall)
   addBox(scene, [t, ROOM.height, depth], [ROOM.maxX + t / 2, ROOM.height / 2, cz], COLOR.wall)
+
+  // 窗外風景(純視覺,不加碰撞):後牆外 z < minZ、左牆外 x < minX,距離約 4~8 公尺
+  const tree = (x, z, trunkH, crown) => {
+    addBox(scene, [0.3, trunkH, 0.3], [x, trunkH / 2, z], COLOR.bark)
+    addBox(scene, [crown, crown, crown], [x, trunkH + crown / 2 - 0.2, z], COLOR.leaf)
+  }
+  // 紅磚立面:axis 'z' 表示位於 z=fixed(後牆外),'x' 表示位於 x=fixed(左牆外)
+  const brickFacade = (axis, fixed, span) => {
+    const isZ = axis === 'z'
+    addBox(scene, isZ ? [span, 7, 0.4] : [0.4, 7, span], isZ ? [0, 3.5, fixed] : [fixed, 3.5, 0], COLOR.brick)
+    // 朝向房間的那一面上的深色小方塊當窗
+    for (const along of [-5, 0, 5]) {
+      for (const y of [2.5, 4.5]) {
+        const dims = isZ ? [1.2, 1.5, 0.05] : [0.05, 1.5, 1.2]
+        const pos = isZ ? [along, y, fixed + 0.21] : [fixed + 0.21, y, along]
+        addBox(scene, dims, pos, COLOR.facadeWindow)
+      }
+    }
+  }
+  brickFacade('z', -13, 18)
+  tree(-6.5, -9.5, 1.0, 1.6)
+  tree(-2.5, -10.2, 1.3, 2.0)
+  tree(1.8, -9.2, 0.9, 1.4)
+  tree(5.8, -10.0, 1.2, 1.8)
+
+  brickFacade('x', -12.5, 18)
+  tree(-11, -3, 1.0, 1.7)
+  tree(-10.6, 1, 1.3, 2.0)
+  tree(-11.2, 4.5, 0.9, 1.4)
 }
 
 const buildFurniture = () => {

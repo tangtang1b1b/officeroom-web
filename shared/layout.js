@@ -20,6 +20,77 @@ export const PLAYER = {
   proneLength: 1.75,
 }
 
+// 方塊小人各部位尺寸(公尺)。模型(utils/office/stickman.js)與命中判定共用同一份,
+// 局部座標:原點在腳底中心,x 向右、y 向上,角色朝 -z。站姿總高 = 腿 + 軀幹 + 頸縫 + 頭 ≈ 1.75。
+export const BODY = {
+  thigh: 0.43,
+  shin: 0.43,
+  legW: 0.15,
+  legD: 0.16,
+  legX: 0.1, // 左右腿中心離中線
+  torsoW: 0.42,
+  torsoD: 0.24,
+  torsoH: 0.6,
+  headS: 0.28,
+  headGap: 0.01,
+  armLen: 0.55,
+  armW: 0.11,
+  armX: 0.265, // 手臂中心離中線(貼著軀幹側面)
+  shoulderDrop: 0.07, // 肩膀低於軀幹頂端
+}
+
+// 命中部位盒(AABB),由 BODY 推導。座標為局部 (右, 上, 前),原點在腳底中心;
+// 前 = (-sin yaw, 0, -cos yaw)、右 = (cos yaw, 0, -sin yaw)。L = 右座標為負側。
+// 站/蹲/趴三種姿勢共用;趴姿沿「前」方向平躺,手臂省略。皆為近似盒,非精確模型。
+function buildHitParts() {
+  const B = BODY
+  const box = (r0, r1, u0, u1, f0, f1) => ({ min: [r0, u0, f0], max: [r1, u1, f1] })
+  const sym = (name, cx, halfW, u0, u1, f0, f1) => ({
+    [name + 'L']: box(-cx - halfW, -cx + halfW, u0, u1, f0, f1),
+    [name + 'R']: box(cx - halfW, cx + halfW, u0, u1, f0, f1),
+  })
+  const legH = B.thigh + B.shin // 0.86
+  const torsoTop = legH + B.torsoH // 1.46
+  const headHalf = B.headS / 2
+  const tw = B.torsoW / 2
+  const td = B.torsoD / 2
+  const ld = B.legD / 2
+  const lw = B.legW / 2
+
+  // 站姿:手臂幾乎水平向前平舉(旋轉約 1.35rad,末端略低於肩)
+  const shoulderY = torsoTop - B.shoulderDrop
+  const stand = {
+    head: box(-headHalf, headHalf, torsoTop + B.headGap, torsoTop + B.headGap + B.headS, -headHalf, headHalf),
+    torso: box(-tw, tw, legH, torsoTop, -td, td),
+    ...sym('arm', B.armX, B.armW / 2, shoulderY - 0.14, shoulderY + B.armW / 2, -B.armW / 2, B.armLen + 0.05),
+    ...sym('leg', B.legX, lw, 0, legH, -ld, ld),
+  }
+
+  // 蹲姿:髖高 0.5、大腿水平向前、軀幹前傾 0.35rad,總高約 1.3
+  const hip = 0.5
+  const lean = 0.35
+  const torsoTopC = hip + B.torsoH * Math.cos(lean) // ~1.06
+  const torsoFwdC = B.torsoH * Math.sin(lean) // ~0.21
+  const headBottomC = torsoTopC - 0.04
+  const crouch = {
+    head: box(-headHalf, headHalf, headBottomC, headBottomC + B.headS, torsoFwdC - headHalf + 0.02, torsoFwdC + headHalf + 0.02),
+    torso: box(-tw, tw, hip, torsoTopC, -td, torsoFwdC + td),
+    ...sym('arm', B.armX, B.armW / 2, torsoTopC - 0.2, torsoTopC - 0.03, torsoFwdC - 0.06, torsoFwdC + B.armLen),
+    ...sym('leg', B.legX, lw, 0, hip + 0.05, -ld, B.thigh + 0.07),
+  }
+
+  // 趴姿:沿「前」從腳底延伸,腿 0~0.86、軀幹 0.86~1.46、頭 1.47~1.75
+  const pH = PLAYER.bodyHeight.prone
+  const prone = {
+    head: box(-headHalf, headHalf, 0, pH, torsoTop + B.headGap, torsoTop + B.headGap + B.headS),
+    torso: box(-tw, tw, 0, pH, legH, torsoTop),
+    ...sym('leg', B.legX, lw, 0, B.legD, 0, legH),
+  }
+  return { stand, crouch, prone }
+}
+
+export const HIT_PARTS = buildHitParts()
+
 const DESK = { w: 1.6, d: 0.75, h: 0.75 }
 const CHAIR = { w: 0.55, d: 0.55, h: 0.9 }
 const CHAIR_COLLIDER_HEIGHT = 1.25 // 含椅背與頭枕

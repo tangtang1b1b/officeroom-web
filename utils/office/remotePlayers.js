@@ -33,6 +33,7 @@ export const createRemotePlayers = (scene) => {
     if (players.has(info.id)) return players.get(info.id)
     const man = createStickman(info.color)
     const label = makeLabel(info.name || '')
+    man.group.userData.bodyMeshes = man.meshes // paint.js 依此把漆彈貼到被打中的身體方塊
     label.sprite.position.y = LABEL_HEIGHT.stand
     man.group.add(label.sprite)
     scene.add(man.group)

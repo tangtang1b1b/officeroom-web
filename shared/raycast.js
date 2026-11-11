@@ -1,5 +1,5 @@
 // 射線檢測純函式。dir 需為單位向量。pos 為玩家腳底位置。
-import { ROOM, PLAYER, COLLIDERS } from './layout.js'
+import { ROOM, COLLIDERS, HIT_PARTS } from './layout.js'
 import { objectBox } from './physics.js'
 
 const EPS = 1e-9
@@ -58,73 +58,30 @@ export function raycastBoxes(origin, dir, boxes = COLLIDERS, maxDist = Infinity)
   return best
 }
 
-// 站/蹲:直立圓柱(側面 + 上下蓋);趴:沿面向平躺的扁盒。yaw 僅趴姿需要。
+// 玩家命中:把射線轉到角色局部座標 (右, 上, 前) 後,對該姿勢的所有部位盒取最近命中。
+// 前 = (-sin yaw, 0, -cos yaw)、右 = (cos yaw, 0, -sin yaw)。回傳 { distance, point, normal, part } 或 null。
 export function raycastPlayer(origin, dir, pos, pose = 'stand', maxDist = Infinity, yaw = 0) {
-  if (pose === 'prone') return raycastProne(origin, dir, pos, yaw, maxDist)
-  const r = PLAYER.radius
-  const h = PLAYER.bodyHeight[pose] ?? PLAYER.bodyHeight.stand
-  const y0 = pos[1]
-  const y1 = pos[1] + h
-  let best = null
-  const consider = (t, normal) => {
-    if (t < 0 || t > maxDist) return
-    if (!best || t < best.distance) best = { distance: t, point: at(origin, dir, t), normal }
-  }
-
-  // 側面:(ox+t dx - cx)^2 + (oz+t dz - cz)^2 = r^2
-  const ox = origin[0] - pos[0]
-  const oz = origin[2] - pos[2]
-  const a = dir[0] * dir[0] + dir[2] * dir[2]
-  if (a > EPS) {
-    const b = 2 * (ox * dir[0] + oz * dir[2])
-    const c = ox * ox + oz * oz - r * r
-    const disc = b * b - 4 * a * c
-    if (disc >= 0) {
-      const t = (-b - Math.sqrt(disc)) / (2 * a)
-      const y = origin[1] + t * dir[1]
-      if (t >= 0 && y >= y0 && y <= y1) {
-        const px = ox + t * dir[0]
-        const pz = oz + t * dir[2]
-        consider(t, [px / r, 0, pz / r])
-      }
-    }
-  }
-  // 上下蓋
-  if (Math.abs(dir[1]) > EPS) {
-    for (const [yy, ny] of [[y1, 1], [y0, -1]]) {
-      const t = (yy - origin[1]) / dir[1]
-      if (t < 0) continue
-      const px = ox + t * dir[0]
-      const pz = oz + t * dir[2]
-      if (px * px + pz * pz <= r * r) consider(t, [0, ny, 0])
-    }
-  }
-  return best
-}
-
-// 趴姿:身體從腳底 pos 沿 (-sin yaw, 0, -cos yaw) 延伸 proneLength,寬 2*radius,高 bodyHeight.prone。
-// 轉到局部座標 (右, 上, 前) 後用 AABB 檢測,再把法線轉回世界座標。
-function raycastProne(origin, dir, pos, yaw, maxDist) {
+  const parts = HIT_PARTS[pose] ?? HIT_PARTS.stand
   const s = Math.sin(yaw)
   const c = Math.cos(yaw)
   const fwd = [-s, 0, -c]
   const right = [c, 0, -s]
   const toLocal = (v) => [v[0] * right[0] + v[2] * right[2], v[1], v[0] * fwd[0] + v[2] * fwd[2]]
-  const rel = [origin[0] - pos[0], origin[1] - pos[1], origin[2] - pos[2]]
-  const r = PLAYER.radius
-  const hit = raycastBox(
-    toLocal(rel),
-    toLocal(dir),
-    [-r, 0, 0],
-    [r, PLAYER.bodyHeight.prone, PLAYER.proneLength],
-    maxDist,
-  )
-  if (!hit) return null
-  const [nr, ny, nf] = hit.normal
+  const lo = toLocal([origin[0] - pos[0], origin[1] - pos[1], origin[2] - pos[2]])
+  const ld = toLocal(dir)
+  let best = null
+  for (const part of Object.keys(parts)) {
+    const hit = raycastBox(lo, ld, parts[part].min, parts[part].max, maxDist)
+    if (hit && (!best || hit.distance < best.distance)) best = { ...hit, part }
+  }
+  if (!best) return null
+  const [nr, ny, nf] = best.normal
   return {
-    distance: hit.distance,
-    point: at(origin, dir, hit.distance),
-    normal: [nr * right[0] + nf * fwd[0], ny, nr * right[2] + nf * fwd[2]],
+    distance: best.distance,
+    point: at(origin, dir, best.distance),
+    // + 0 把 -0 正規化成 0
+    normal: [nr * right[0] + nf * fwd[0] + 0, ny + 0, nr * right[2] + nf * fwd[2] + 0],
+    part: best.part,
   }
 }
 

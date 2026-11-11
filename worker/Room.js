@@ -210,7 +210,10 @@ export class Room extends DurableObject {
       normal: hit.normal,
       color: p.color,
     }
-    if (hit.kind === 'player') paint.targetId = hit.targetId
+    if (hit.kind === 'player') {
+      paint.targetId = hit.targetId
+      if (hit.part) paint.part = hit.part
+    }
     if (hit.kind === 'object') {
       paint.objectId = hit.objectId
       const obj = this.objects.find((o) => o.id === hit.objectId)

@@ -61,7 +61,7 @@ describe('protocol', () => {
     expect(S2C.ERROR).toBe('error')
     expect(parseServerMessage(JSON.stringify({ type: 'error', error: 'room full' })).ok).toBe(true)
     expect(parseServerMessage(JSON.stringify({ type: 'correct', pos: [1, 0, 2] })).ok).toBe(true)
-    expect(parseServerMessage(JSON.stringify({ type: 'paint', from: '1', origin: [0, 1, 0], pos: [1, 1, 1], normal: [0, 1, 0], color: '#fff' })).ok).toBe(true)
+    expect(parseServerMessage(JSON.stringify({ type: 'paint', from: '1', origin: [0, 1, 0], pos: [1, 1, 1], normal: [0, 1, 0], color: '#fff', part: 'head' })).ok).toBe(true)
     expect(parseServerMessage(JSON.stringify({ type: 'bogus' })).ok).toBe(false)
   })
   it('rejects malformed / unknown input', () => {
