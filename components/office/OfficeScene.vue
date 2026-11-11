@@ -626,6 +626,7 @@ onMounted(() => {
       }
       // 快照中已不存在的玩家(例如斷線期間離開)移除
       for (const id of remotes.liveIds()) {
+        if (id.startsWith(IDLE_PREFIX)) continue // 離線人偶由 syncIdleSeats 管理
         if (!present.has(id)) remotes.remove(id)
       }
     },

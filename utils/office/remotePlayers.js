@@ -105,8 +105,8 @@ export const createRemotePlayers = (scene) => {
     has: (id) => players.has(id),
     getGroup: (id) => players.get(id)?.man.group,
     ids: () => [...players.keys()],
-    // 可被瞄準的玩家(不含離線的座位人偶,伺服器不認得它們)
-    liveIds: () => [...players.keys()].filter((id) => !id.startsWith(IDLE_PREFIX)),
+    // 可被瞄準的玩家(含離線的座位人偶,伺服器也會判定它們)
+    liveIds: () => [...players.keys()],
     idleIds: () => [...players.keys()].filter((id) => id.startsWith(IDLE_PREFIX)),
     dispose() {
       for (const id of [...players.keys()]) remove(id)

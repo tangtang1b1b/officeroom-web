@@ -3,7 +3,7 @@
 // 遊戲連線期間本來就需要持續運作,Hibernation 會在閒置時清空記憶體且需另外序列化 attachment,徒增複雜度。
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
-import { SPAWN_POINTS, COLLIDERS, seatById, seatSpot } from '../shared/layout.js'
+import { SPAWN_POINTS, COLLIDERS, SEATS, seatById, seatSpot } from '../shared/layout.js'
 import { standUpSpot } from '../shared/collision.js'
 import { MAX_PLAYERS, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
@@ -194,8 +194,18 @@ export class Room extends DurableObject {
     const seatedChairs = new Set(
       [...this.players.values()].filter((q) => q.pose === 'sit' && q.seatId).map((q) => seatById(q.seatId)?.chairId),
     )
+    // 離線同事:沒人在線的有名字座位上坐著人偶,也可以被打(id 與前端 IDLE_PREFIX 相同)
+    const online = new Set([...this.players.values()].map((q) => q.seatId).filter(Boolean))
+    const idleDolls = []
+    for (const seat of SEATS) {
+      if (!seat.name || online.has(seat.id)) continue
+      const spot = seatSpot(seat.id)
+      if (!spot) continue
+      idleDolls.push({ id: `idle:${seat.id}`, pos: [spot.x, 0, spot.z], yaw: spot.yaw, pose: 'sit' })
+      seatedChairs.add(seat.chairId)
+    }
     const hit = raycastWorld(msg.origin, msg.dir, {
-      players: [...this.players.values()],
+      players: [...this.players.values(), ...idleDolls],
       boxes: COLLIDERS.filter((box) => !seatedChairs.has(box.id)),
       ignoreId: p.id,
       maxDist: MAX_SHOT_DIST,
