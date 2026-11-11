@@ -11,6 +11,8 @@ const POSES = {
   // 手臂掛在前傾的軀幹上,實際角度 = arm - lean,所以 arm 補上 lean 才會維持幾乎水平向前
   crouch: { hipY: BODY.shin + 0.02, thigh: 1.5, lean: 0.35, rootPitch: 0, rootY: 0, arm: 1.65, armL: 0.4 },
   prone: { hipY: LEG, thigh: 0, lean: 0, rootPitch: -Math.PI / 2, rootY: BODY.headS / 2, arm: 2.9, armL: 2.9 },
+  // 坐姿:原點在椅子中心(髖在原點正上方 0.45m),大腿水平向前、小腿垂直,手臂前伸放在桌面
+  sit: { hipY: BODY.shin + 0.02, thigh: 1.5, lean: 0.05, rootPitch: 0, rootY: 0, arm: 1.2, armL: 1.0 },
 }
 
 const HAIRS = [0x2a2118, 0x6b4a2b, 0xc9a24a, 0x1c1c1c, 0x8a3b2a, 0xb4542c]
@@ -220,6 +222,11 @@ export const createStickman = (color = 0x2d9cdb, appearance) => {
       if (!POSES[next]) return
       pose = next
       target = POSES[next]
+    },
+    // 立即套用目前姿勢(不做插值),用於人物第一次出現時
+    snapPose() {
+      Object.assign(current, target)
+      apply(0)
     },
     // pitch:視線上下角度(rad,正為抬頭);趴姿範圍較小,避免手臂穿進地板
     setLook(pitch) {

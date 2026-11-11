@@ -7,6 +7,8 @@ import {
   evaluateMove,
   pickSpawnPoint,
   isShootOriginValid,
+  evaluateStateChange,
+  isNameReserved,
   spawnYaw,
   isOriginAllowed,
   parseAllowedOrigins,
@@ -22,8 +24,8 @@ import {
   MAX_UNJOINED,
   IDLE_TIMEOUT_MS,
 } from '../worker/rules.js'
-import { isBlocked } from '../shared/collision.js'
-import { COLLIDERS, ROOM, PLAYER, SPAWN_POINTS } from '../shared/layout.js'
+import { isBlocked, standUpSpot } from '../shared/collision.js'
+import { COLLIDERS, ROOM, PLAYER, SPAWN_POINTS, SEATS, seatSpot, seatById } from '../shared/layout.js'
 
 const player = (pose = 'stand', pos = [-6, 0, -1.2], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
 
@@ -242,5 +244,67 @@ describe('pickSpawnPoint', () => {
     for (const sp of SPAWN_POINTS) expect(isBlocked(sp.x, sp.z)).toBe(false)
     const sp = pickSpawnPoint(SPAWN_POINTS, [[-8, 0, 1.5]])
     expect(sp.x).toBeGreaterThan(0)
+  })
+})
+
+describe('sit rules', () => {
+  const spot = seatSpot('seat-3')
+  const seated = () => ({ ...player('sit', [spot.x, 0, spot.z]), seatId: 'seat-3' })
+  const near = () => ({ ...player('stand', [spot.x + 0.8, 0, spot.z + 0.3]), seatId: 'seat-3' })
+  const st = (pos, pose) => ({ pos, yaw: 1, pitch: 0.2, pose })
+
+  it('seatSpot / seatById', () => {
+    expect(seatById('seat-3').name).toBe('Amin')
+    expect(seatSpot('nope')).toBeNull()
+    expect(seatSpot('seat-will').yaw).toBeCloseTo(-Math.PI / 2)
+  })
+  it('sit -> sit ignores pos, updates angles', () => {
+    const p = seated()
+    const r = evaluateStateChange(p, st([0, 0, 0], 'sit'), 0)
+    expect(r.pos).toEqual(p.pos)
+    expect(r.pose).toBe('sit')
+    expect(r.yaw).toBe(1)
+    expect(r.correct).toBe(false)
+  })
+  it('stand -> sit accepted near the seat', () => {
+    const r = evaluateStateChange(near(), st([spot.x + 0.05, 0, spot.z], 'sit'), 0)
+    expect(r.pose).toBe('sit')
+    expect(r.pos).toEqual([spot.x, 0, spot.z])
+    expect(r.correct).toBe(false)
+  })
+  it('stand -> sit rejected: no seatId, too far, bad client pos', () => {
+    const noSeat = { ...near(), seatId: null }
+    expect(evaluateStateChange(noSeat, st([spot.x, 0, spot.z], 'sit'), 0)).toMatchObject({ pose: 'stand', correct: true })
+    const far = { ...player('stand', [spot.x + 3, 0, spot.z]), seatId: 'seat-3' }
+    expect(evaluateStateChange(far, st([spot.x, 0, spot.z], 'sit'), 0)).toMatchObject({ pose: 'stand', correct: true })
+    const r = evaluateStateChange(near(), st([spot.x + 0.5, 0, spot.z], 'sit'), 0)
+    expect(r.pose).toBe('stand')
+    expect(r.pos).toEqual(near().pos)
+    expect(r.correct).toBe(true)
+  })
+  it('sit -> stand uses evaluateMove', () => {
+    const out = standUpSpot('seat-3')
+    const ok = evaluateStateChange(seated(), st([out.x, 0, out.z], 'stand'), 1000)
+    expect(ok).toMatchObject({ pose: 'stand', correct: false })
+    expect(ok.pos).toEqual([out.x, 0, out.z])
+    const bad = evaluateStateChange(seated(), st([spot.x + 5, 0, spot.z], 'stand'), 1000)
+    expect(bad).toMatchObject({ pose: 'sit', correct: true })
+    expect(bad.pos).toEqual([spot.x, 0, spot.z])
+  })
+  it('standUpSpot is free for every named seat', () => {
+    for (const s of SEATS.filter((x) => x.name)) {
+      const out = standUpSpot(s.id)
+      expect(out, s.id).not.toBeNull()
+      expect(isBlocked(out.x, out.z, PLAYER.radius), s.id).toBe(false)
+    }
+    expect(standUpSpot('nope')).toBeNull()
+  })
+  it('shoot origin from seated eye is valid', () => {
+    expect(isShootOriginValid([spot.x, PLAYER.eyeHeight.sit, spot.z], [spot.x, 0, spot.z])).toBe(true)
+  })
+  it('reserved names are case-insensitive', () => {
+    expect(isNameReserved('will')).toBe(true)
+    expect(isNameReserved('SANDY')).toBe(true)
+    expect(isNameReserved('Bob')).toBe(false)
   })
 })

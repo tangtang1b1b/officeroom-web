@@ -22,8 +22,11 @@ const makeLabel = (name) => {
   return { sprite, texture, material }
 }
 
-const angleDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a))
-const LABEL_HEIGHT = { stand: 2.05, crouch: 1.6, prone: 0.7 }
+// 離線同事坐在位子上的人偶,id 以此前綴區分(只在前端存在)
+export const IDLE_PREFIX = 'idle:'
+
+const angleDiff =(a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a))
+const LABEL_HEIGHT = { stand: 2.05, crouch: 1.6, prone: 0.7, sit: 1.6 }
 
 // 其他玩家的火柴人:收到快照後朝目標平滑插值
 export const createRemotePlayers = (scene) => {
@@ -67,6 +70,11 @@ export const createRemotePlayers = (scene) => {
       entry.placed = true
       entry.man.group.position.set(x, 0, z)
       entry.man.group.rotation.y = info.yaw
+      // 第一次出現就直接是該姿勢(例如坐著),不要先站著再慢慢坐下
+      entry.pose = info.pose
+      entry.man.setPose(info.pose)
+      entry.man.snapPose?.()
+      entry.label.sprite.position.y = LABEL_HEIGHT[info.pose] ?? LABEL_HEIGHT.stand
     }
   }
 
@@ -97,6 +105,9 @@ export const createRemotePlayers = (scene) => {
     has: (id) => players.has(id),
     getGroup: (id) => players.get(id)?.man.group,
     ids: () => [...players.keys()],
+    // 可被瞄準的玩家(不含離線的座位人偶,伺服器不認得它們)
+    liveIds: () => [...players.keys()].filter((id) => !id.startsWith(IDLE_PREFIX)),
+    idleIds: () => [...players.keys()].filter((id) => id.startsWith(IDLE_PREFIX)),
     dispose() {
       for (const id of [...players.keys()]) remove(id)
     },

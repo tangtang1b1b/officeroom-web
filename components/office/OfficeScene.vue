@@ -1,13 +1,15 @@
 <script setup>
 import * as THREE from 'three'
-import { createRemotePlayers } from '~/utils/office/remotePlayers.js'
+import { createRemotePlayers, IDLE_PREFIX } from '~/utils/office/remotePlayers.js'
+import { PLAYER_COLORS, MAX_PLAYERS } from '~/shared/protocol.js'
 import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
-import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF } from '~/shared/layout.js'
+import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF, SEATS, seatSpot } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
+  seatId: { type: String, default: '' }, // 選名字登入時的座位;訪客為空
 })
 const emit = defineEmits(['logout'])
 
@@ -19,8 +21,11 @@ const hovering = ref(false) // 游標是否正指著別的玩家
 const cursor = ref({ x: 0, y: 0 })
 const poseLabel = ref('站立')
 const hitFlash = ref({ key: 0, color: '#ffffff' })
-const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下' }
+const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下', sit: '坐著' }
 const STATUS_TEXT = {
+  seat_taken: '這個座位已有人上線,請按右上角「登出」後改選別的名字',
+  bad_seat: '找不到這個座位,請按右上角「登出」後重新選擇',
+  name_reserved: '這個名稱屬於座位上的同事,請「登出」後從名單選自己的名字',
   connecting: '連線中…',
   reconnecting: '連線中斷,重新連線中…',
   full: '辦公室已滿(最多 7 人),會自動重試…',
@@ -418,7 +423,7 @@ const updateHover = () => {
   if (!pointerInside || !remotes) return
   owners.clear()
   candidates.length = 0
-  for (const id of remotes.ids()) {
+  for (const id of remotes.liveIds()) {
     for (const mesh of remotes.getGroup(id)?.userData.bodyMeshes || []) {
       owners.set(mesh, id)
       candidates.push(mesh)
@@ -432,6 +437,33 @@ const updateHover = () => {
     if (hit && hit.distance <= MAX_AIM_DIST && owners.has(hit.object)) hoverHit = { point: hit.point.clone(), id: owners.get(hit.object) }
   }
   if (hovering.value !== !!hoverHit) hovering.value = !!hoverHit
+}
+
+// 離線同事:沒有人在線的座位(SEATS 有名字者)上,畫一個坐著的人偶。
+// 在線名單(roster)的 seatId 對得上就移除人偶,對不上就補上。
+const syncIdleSeats = () => {
+  if (!remotes) return
+  const online = new Set(store.roster.map((r) => r.seatId).filter(Boolean))
+  SEATS.forEach((seat, index) => {
+    if (!seat.name) return
+    const id = IDLE_PREFIX + seat.id
+    if (online.has(seat.id)) {
+      remotes.remove(id)
+      return
+    }
+    if (remotes.has(id)) return
+    const spot = seatSpot(seat.id)
+    if (!spot) return
+    remotes.applyState({
+      id,
+      name: seat.name,
+      color: PLAYER_COLORS[index % PLAYER_COLORS.length],
+      pos: [spot.x, 0, spot.z],
+      yaw: spot.yaw,
+      pitch: 0,
+      pose: 'sit',
+    })
+  })
 }
 
 const shoot = () => {
@@ -564,20 +596,27 @@ onMounted(() => {
         controls.state.x = msg.you.pos[0]
         controls.state.z = msg.you.pos[2]
         controls.state.yaw = msg.you.yaw ?? controls.state.yaw
+        controls.state.pose = msg.you.pose ?? 'stand'
+        controls.state.pitch = 0
       }
       // 重連或伺服器重啟後 id 可能重新編號,先清掉舊的遠端玩家再重建
       remotes.dispose()
       for (const player of msg.players || []) {
         if (player.id !== store.myId && player.pos) remotes.applyState(player)
       }
+      syncIdleSeats()
       paint.clear()
     },
     playerJoin: (player) => {
       if (player.id === store.myId || !player.pos) return
       remotes.remove(player.id) // 同 id 的舊資料(名字、顏色)不能沿用
       remotes.applyState(player)
+      syncIdleSeats()
     },
-    playerLeave: (id) => remotes.remove(id),
+    playerLeave: (id) => {
+      remotes.remove(id)
+      syncIdleSeats()
+    },
     snapshot: (players) => {
       const present = new Set()
       for (const player of players) {
@@ -586,7 +625,7 @@ onMounted(() => {
         remotes.applyState(player)
       }
       // 快照中已不存在的玩家(例如斷線期間離開)移除
-      for (const id of remotes.ids()) {
+      for (const id of remotes.liveIds()) {
         if (!present.has(id)) remotes.remove(id)
       }
     },
@@ -606,12 +645,15 @@ onMounted(() => {
       if (origin) paint.addProjectile(origin, msg.pos, msg.color, onHit)
       else onHit()
     },
-    correct: (pos) => {
+    correct: (pos, pose) => {
       controls.state.x = pos[0]
       controls.state.z = pos[2]
+      if (pose) controls.state.pose = pose // 起身被拒要回到坐姿、坐下被拒要回到站姿
     },
+    rejected: () => syncIdleSeats(),
   })
-  network.connect(props.nickname)
+  syncIdleSeats() // 還沒連上(或連線中)時,所有有名字的座位先顯示坐著的人偶
+  network.connect(props.nickname, props.seatId || null)
 
   resize()
   resizeObserver = new ResizeObserver(resize)
@@ -672,7 +714,7 @@ onBeforeUnmount(() => {
       :class="statusText ? 'bg-red-600/90 text-white' : 'bg-white/90 text-neutral-700'"
     >
       <template v-if="statusText">{{ statusText }}</template>
-      <template v-else>🎯 漆彈對戰 · 線上 {{ store.roster.length }}/7 · {{ poseLabel }}</template>
+      <template v-else>🎯 漆彈對戰 · 線上 {{ store.roster.length }}/{{ MAX_PLAYERS }} · {{ poseLabel }}</template>
     </p>
 
     <!-- 右上:連線、人數、暱稱、登出 -->

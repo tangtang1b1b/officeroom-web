@@ -2,6 +2,12 @@ import { C2S, S2C, parseServerMessage, encode } from '~/shared/protocol.js'
 import { useAllStore } from '~/store/all.js'
 
 const MAX_RETRIES = 10
+// 伺服器拒絕加入的原因 → 連線狀態(不重試)
+const REJECTIONS = new Map([
+  ['seat taken', 'seat_taken'],
+  ['bad seat', 'bad_seat'],
+  ['name reserved', 'name_reserved'],
+])
 
 // 與 Worker 的 WebSocket 連線:自動重連、訊息分派。
 // handlers:welcome(msg) / playerJoin(player) / playerLeave(id) / snapshot(players) / paint(msg) / correct(pos)
@@ -14,6 +20,9 @@ export const useNetwork = (handlers = {}) => {
   let retryTimer = null
   let closed = false
   let roomFull = false
+  let rejected = false
+  let wasOnline = false
+  let seatId = null
 
   const url = () => {
     // WS_URL 在建置時固定(Vercel 的環境變數),指向 Cloudflare Worker 的 wss://…/ws。
@@ -27,7 +36,7 @@ export const useNetwork = (handlers = {}) => {
   }
 
   const upsertRoster = (player) => {
-    const entry = { id: player.id, name: player.name, color: player.color }
+    const entry = { id: player.id, name: player.name, color: player.color, seatId: player.seatId ?? null }
     const index = store.roster.findIndex((item) => item.id === player.id)
     if (index >= 0) store.roster[index] = entry
     else store.roster.push(entry)
@@ -37,8 +46,9 @@ export const useNetwork = (handlers = {}) => {
     switch (msg.type) {
       case S2C.WELCOME:
         store.myId = msg.id
-        store.roster = (msg.players || []).map((p) => ({ id: p.id, name: p.name, color: p.color }))
+        store.roster = (msg.players || []).map((p) => ({ id: p.id, name: p.name, color: p.color, seatId: p.seatId ?? null }))
         store.netStatus = 'online'
+        wasOnline = true
         retries = 0
         handlers.welcome?.(msg)
         break
@@ -65,12 +75,21 @@ export const useNetwork = (handlers = {}) => {
         handlers.paint?.(msg)
         break
       case S2C.CORRECT:
-        handlers.correct?.(msg.pos)
+        handlers.correct?.(msg.pos, msg.pose)
         break
       case S2C.ERROR:
         if (msg.error === 'room full') {
           roomFull = true
           store.netStatus = 'full'
+        } else if (msg.error === 'seat taken' && wasOnline) {
+          // 斷線重連時舊連線可能還沒被伺服器清掉:照一般重連的退避時間再試,不要放棄
+          store.netStatus = 'reconnecting'
+        } else if (REJECTIONS.has(msg.error)) {
+          // 座位已被占用、名稱不可用等:重試也不會成功,停止重連並提示
+          rejected = true
+          store.netStatus = REJECTIONS.get(msg.error)
+          store.roster = [] // 沒有加入成功,名單不可沿用上次的資料
+          handlers.rejected?.()
         }
         break
     }
@@ -80,14 +99,14 @@ export const useNetwork = (handlers = {}) => {
     if (closed) return
     store.netStatus = retries > 0 ? 'reconnecting' : 'connecting'
     ws = new WebSocket(url())
-    ws.onopen = () => send({ type: C2S.JOIN, name })
+    ws.onopen = () => send(seatId ? { type: C2S.JOIN, name, seatId } : { type: C2S.JOIN, name })
     ws.onmessage = (event) => {
       const parsed = parseServerMessage(event.data)
       if (parsed.ok) handle(parsed.msg)
     }
     ws.onclose = () => {
       ws = null
-      if (closed) return
+      if (closed || rejected) return
       // 房間已滿:不計入重試次數,固定間隔再試,有人離開時就能進入
       if (roomFull) {
         roomFull = false
@@ -108,10 +127,13 @@ export const useNetwork = (handlers = {}) => {
   }
 
   return {
-    connect(nickname) {
+    connect(nickname, seat = null) {
       name = nickname
+      seatId = seat
       closed = false
       roomFull = false
+      rejected = false
+      wasOnline = false
       connect()
     },
     sendState: (pos, yaw, pitch, pose) => send({ type: C2S.STATE, pos, yaw, pitch, pose }),

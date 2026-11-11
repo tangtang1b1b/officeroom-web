@@ -1,5 +1,5 @@
 // 伺服器規則的純函式(不依賴 Durable Object,方便單元測試)。時間單位:毫秒。
-import { ROOM, PLAYER, COLLIDERS } from '../shared/layout.js'
+import { ROOM, PLAYER, COLLIDERS, SEATS, seatSpot } from '../shared/layout.js'
 import { isBlocked } from '../shared/collision.js'
 
 export const MOVE_SPEED_FACTOR = 1.3
@@ -7,6 +7,8 @@ export const MOVE_BUDGET_CAP = 2.0 // 公尺;約 0.6 秒的行走距離,容許�
 export const COLLISION_RADIUS_TOLERANCE = 0.01
 export const MAX_SHOOT_ORIGIN_HORIZ = 1.5 // 伺服器位置會落後客戶端
 export const SHOOT_ORIGIN_Y_MARGIN = 0.1
+export const SIT_MAX_PLAYER_DIST = 1.5 // 坐下時玩家距座位中心上限
+export const SIT_MAX_CLIENT_DIST = 0.1 // 客戶端回報的坐下位置與座位中心的容許誤差
 export const SHOOT_COOLDOWN_MS = 150
 export const CHAT_WINDOW_MS = 1000
 export const CHAT_MAX_PER_WINDOW = 3
@@ -82,6 +84,37 @@ export function evaluateMove(player, newPos, now) {
   }
   bucket.budget -= dist
   return { ok: true, pos: [newPos[0], 0, newPos[2]], cost: dist }
+}
+
+// 訪客名稱是否與座位表的員工名衝突(不分大小寫)
+export function isNameReserved(name) {
+  const n = String(name).toLowerCase()
+  return SEATS.some((s) => s.name && s.name.toLowerCase() === n)
+}
+
+// 狀態更新規則(含坐姿)。player: { pos, pose, seatId, move }。
+// 回傳 { pos, pose, yaw, pitch, correct };correct 為 true 表示應回傳 CORRECT(由呼叫端節流,內容為 pos)。
+export function evaluateStateChange(player, msg, now) {
+  const base = { yaw: msg.yaw, pitch: msg.pitch }
+  if (player.pose === 'sit' && msg.pose === 'sit') {
+    return { ...base, pos: player.pos, pose: 'sit', correct: false }
+  }
+  if (player.pose !== 'sit' && msg.pose === 'sit') {
+    const spot = player.seatId ? seatSpot(player.seatId) : null
+    const ok =
+      spot &&
+      Math.hypot(player.pos[0] - spot.x, player.pos[2] - spot.z) <= SIT_MAX_PLAYER_DIST &&
+      Math.hypot(msg.pos[0] - spot.x, msg.pos[2] - spot.z) <= SIT_MAX_CLIENT_DIST
+    if (!ok) return { ...base, pos: player.pos, pose: player.pose, correct: true }
+    return { ...base, pos: [spot.x, 0, spot.z], pose: 'sit', correct: false }
+  }
+  const result = evaluateMove(player, msg.pos, now)
+  if (player.pose === 'sit') {
+    // 起身:失敗則留在座位
+    if (!result.ok) return { ...base, pos: player.pos, pose: 'sit', correct: true }
+    return { ...base, pos: result.pos, pose: msg.pose, correct: false }
+  }
+  return { ...base, pos: result.ok ? result.pos : player.pos, pose: msg.pose, correct: !result.ok }
 }
 
 // 選出生點:優先不與固定碰撞方塊重疊的候選,離現有玩家最遠者;全部重疊時退回不考慮方塊。

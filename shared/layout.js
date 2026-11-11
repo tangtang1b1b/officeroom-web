@@ -22,9 +22,9 @@ export const minZAt = (x) => WALL_SLANT.z0 + ((WALL_SLANT.z1 - WALL_SLANT.z0) * 
 export const PLAYER = {
   radius: 0.2, // 碰撞圓半徑(比肩寬小,過走道與門不易卡住)
   // 各姿勢的身體高度與眼睛高度(須與 utils/office/stickman.js 的模型一致)
-  bodyHeight: { stand: 1.75, crouch: 1.3, prone: 0.3 },
-  eyeHeight: { stand: 1.6, crouch: 1.15, prone: 0.4 },
-  walkSpeed: { stand: 3.2, crouch: 1.6, prone: 0.8 },
+  bodyHeight: { stand: 1.75, crouch: 1.3, prone: 0.3, sit: 1.3 },
+  eyeHeight: { stand: 1.6, crouch: 1.15, prone: 0.4, sit: 1.19 },
+  walkSpeed: { stand: 3.2, crouch: 1.6, prone: 0.8, sit: 1.6 },
   // 趴下時身體從腳底沿面向(-z 旋轉 yaw)平躺的長度
   proneLength: 1.75,
 }
@@ -88,6 +88,17 @@ function buildHitParts() {
     ...sym('leg', B.legX, lw, 0, hip + 0.05, -ld, B.thigh + 0.07),
   }
 
+  // 坐姿:髖高 0.45、大腿水平向前、軀幹直立,總高約 1.3
+  const sHip = 0.45
+  const sTorsoTop = sHip + B.torsoH // 1.05
+  const sHeadBottom = sTorsoTop + B.headGap
+  const sit = {
+    head: box(-headHalf, headHalf, sHeadBottom, sHeadBottom + B.headS, -headHalf, headHalf),
+    torso: box(-tw, tw, sHip, sTorsoTop, -td, td),
+    ...sym('arm', B.armX, B.armW / 2, sTorsoTop - 0.2, sTorsoTop - 0.03, -B.armW / 2, B.armLen),
+    ...sym('leg', B.legX, lw, 0, sHip + 0.05, -ld, B.thigh + 0.07),
+  }
+
   // 趴姿:沿「前」從腳底延伸,腿 0~0.86、軀幹 0.86~1.46、頭 1.47~1.75
   const pH = PLAYER.bodyHeight.prone
   const prone = {
@@ -95,7 +106,7 @@ function buildHitParts() {
     torso: box(-tw, tw, 0, pH, legH, torsoTop),
     ...sym('leg', B.legX, lw, 0, B.legD, 0, legH),
   }
-  return { stand, crouch, prone }
+  return { stand, crouch, prone, sit }
 }
 
 export const HIT_PARTS = buildHitParts()
@@ -277,3 +288,12 @@ export const SPAWN_POINTS = [
   { x: 4.6, z: 5.2 },
   { x: 0.3, z: 4.2 },
 ]
+
+export const seatById = (seatId) => SEATS.find((s) => s.id === seatId)
+
+// 坐下時的位置與朝向(椅子中心與 yaw);找不到座位或椅子回 null
+export const seatSpot = (seatId) => {
+  const seat = seatById(seatId)
+  const chair = seat && CHAIRS.find((c) => c.id === seat.chairId)
+  return chair ? { x: chair.x, z: chair.z, yaw: chair.yaw } : null
+}

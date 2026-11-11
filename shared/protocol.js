@@ -5,7 +5,8 @@ export const MAX_PLAYERS = 7
 export const PLAYER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
 export const MAX_NAME_LENGTH = 16
 export const MAX_CHAT_LENGTH = 200
-export const POSES = ['stand', 'crouch', 'prone']
+export const MAX_SEAT_ID_LENGTH = 32
+export const POSES = ['stand', 'crouch', 'prone', 'sit']
 
 export const C2S = {
   JOIN: 'join',
@@ -26,15 +27,16 @@ export const S2C = {
 }
 
 // 最終伺服器訊息格式(pos 皆為 [x,y,z]):
-// welcome     { type, id, you:{pos,yaw}, players:[Player] }
+// join(C2S)   { type, name, seatId? }  // seatId 選填(≤32 字元);有 seatId 時伺服器以座位表的名字為準
+// welcome     { type, id, you:{pos,yaw,pose,seatId}, players:[Player] }
 // player_join { type, player:Player }
 // player_leave{ type, id }
 // snapshot    { type, players:[Player] }
 // chat        { type, from:name, text }
 // paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, part? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
-// correct     { type, pos:[x,y,z] }
-// error       { type, error }
-// Player = { id, name, color, pos, yaw, pitch, pose }
+// correct     { type, pos:[x,y,z], pose }  // 客戶端須同時套用 pose(坐姿時 pos 即座位中心)
+// error       { type, error }  // 含 'room full' | 'seat taken' | 'bad seat' | 'name reserved'(後三者伺服器隨即斷線 1008)
+// Player = { id, name, color, pos, yaw, pitch, pose, seatId }  // seatId 訪客為 null
 
 export const MAX_PITCH = 1.5
 
@@ -68,7 +70,12 @@ export function validateClientMessage(data) {
       if (typeof data.name !== 'string') return fail('bad name')
       const name = sanitizeName(data.name)
       if (name.length === 0 || name.length > MAX_NAME_LENGTH) return fail('bad name')
-      return { ok: true, msg: { type: C2S.JOIN, name } }
+      const msg = { type: C2S.JOIN, name }
+      if (data.seatId !== undefined && data.seatId !== null) {
+        if (typeof data.seatId !== 'string' || data.seatId.length === 0 || data.seatId.length > MAX_SEAT_ID_LENGTH) return fail('bad seat')
+        msg.seatId = data.seatId
+      }
+      return { ok: true, msg }
     }
     case C2S.STATE: {
       if (!isVec3(data.pos) || data.pos.some((n) => Math.abs(n) > COORD_LIMIT)) return fail('bad pos')

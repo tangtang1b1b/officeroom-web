@@ -3,7 +3,8 @@
 // 遊戲連線期間本來就需要持續運作,Hibernation 會在閒置時清空記憶體且需另外序列化 attachment,徒增複雜度。
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
-import { SPAWN_POINTS } from '../shared/layout.js'
+import { SPAWN_POINTS, COLLIDERS, seatById, seatSpot } from '../shared/layout.js'
+import { standUpSpot } from '../shared/collision.js'
 import { MAX_PLAYERS, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
 import {
@@ -20,7 +21,8 @@ import {
   rateAllow,
   cooldownReady,
   createMoveBucket,
-  evaluateMove,
+  evaluateStateChange,
+  isNameReserved,
   isShootOriginValid,
   spawnYaw,
   pickSpawnPoint,
@@ -30,6 +32,7 @@ const COLORS = PLAYER_COLORS
 const BROADCAST_MS = 50
 const CORRECT_MIN_INTERVAL_MS = 100
 const MAX_SHOT_DIST = 25
+const STALE_HOLDER_MS = 2000
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -105,18 +108,37 @@ export class Room extends DurableObject {
       this.drop(session, 1013, 'room full')
       return
     }
+    let seat = null
+    if (msg.seatId !== undefined) {
+      seat = seatById(msg.seatId)
+      let err = null
+      if (!seat || seat.name === null || !seatSpot(seat.id)) err = 'bad seat'
+      else {
+        const holder = [...this.players.values()].find((p) => p.seatId === seat.id)
+        // 斷線重連時舊連線可能還沒被清掉:對方超過 STALE_HOLDER_MS 沒有任何訊息(正常連線每 50ms 送狀態)就讓新連線接手
+        if (holder && Date.now() - holder.lastMessageAt > STALE_HOLDER_MS) this.drop(holder, 1001, 'replaced')
+        else if (holder) err = 'seat taken'
+      }
+      if (err) return this.reject(session, err)
+    } else if (isNameReserved(msg.name)) {
+      return this.reject(session, 'name reserved')
+    }
     const used = new Set([...this.players.values()].map((p) => p.color))
     const color = COLORS.find((c) => !used.has(c)) ?? COLORS[0]
-    const spawn = this.pickSpawn()
+    // 連線後一律站著:有座位的人出生在自己椅子旁(面向桌子);坐著只用在離線時的人偶
+    const seatFacing = seat ? seatSpot(seat.id) : null
+    const spot = seat ? standUpSpot(seat.id) : null
+    const spawn = spot ?? this.pickSpawn()
     const now = Date.now()
     Object.assign(session, {
       joined: true,
-      name: msg.name,
+      name: seat ? seat.name : msg.name,
       color,
       pos: [spawn.x, 0, spawn.z],
-      yaw: spawnYaw(spawn.x, spawn.z),
+      yaw: spot && seatFacing ? seatFacing.yaw : spawnYaw(spawn.x, spawn.z),
       pitch: 0,
       pose: 'stand',
+      seatId: seat ? seat.id : null,
       move: createMoveBucket(now),
     })
     clearTimeout(session.joinTimer)
@@ -124,11 +146,16 @@ export class Room extends DurableObject {
     this.send(session.ws, {
       type: S2C.WELCOME,
       id: session.id,
-      you: { pos: session.pos, yaw: session.yaw },
+      you: { pos: session.pos, yaw: session.yaw, pose: session.pose, seatId: session.seatId },
       players: [...this.players.values()].map(publicPlayer),
     })
     this.broadcast({ type: S2C.PLAYER_JOIN, player: publicPlayer(session) }, session.id)
     this.startTimer()
+  }
+
+  reject(session, error) {
+    this.send(session.ws, { type: S2C.ERROR, error })
+    this.drop(session, 1008, error)
   }
 
   // 選離現有玩家最遠、且不在固定障礙內的出生點
@@ -138,17 +165,16 @@ export class Room extends DurableObject {
 
   onState(p, msg, now) {
     if (!rateAllow(p.stateLimiter, now, STATE_MAX_PER_SEC)) return
-    const result = evaluateMove(p, msg.pos, now)
+    const r = evaluateStateChange(p, msg, now)
     p.lastStateAt = now
-    if (result.ok) {
-      p.pos = result.pos
-    } else if (now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
+    p.pos = r.pos
+    if (r.correct && now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
       p.lastCorrect = now
-      this.send(p.ws, { type: S2C.CORRECT, pos: p.pos })
+      this.send(p.ws, { type: S2C.CORRECT, pos: p.pos, pose: r.pose })
     }
-    p.yaw = msg.yaw
-    p.pitch = msg.pitch
-    p.pose = msg.pose
+    p.yaw = r.yaw
+    p.pitch = r.pitch
+    p.pose = r.pose
   }
 
   onChat(p, msg, now) {
@@ -164,8 +190,13 @@ export class Room extends DurableObject {
   onShoot(p, msg, now) {
     if (!cooldownReady(p, 'lastShoot', now, SHOOT_COOLDOWN_MS)) return
     if (!isShootOriginValid(msg.origin, p.pos)) return
+    // 坐著的人身體在椅子碰撞盒內:射線不被自己那張椅子擋住,否則坐下就等於無敵
+    const seatedChairs = new Set(
+      [...this.players.values()].filter((q) => q.pose === 'sit' && q.seatId).map((q) => seatById(q.seatId)?.chairId),
+    )
     const hit = raycastWorld(msg.origin, msg.dir, {
       players: [...this.players.values()],
+      boxes: COLLIDERS.filter((box) => !seatedChairs.has(box.id)),
       ignoreId: p.id,
       maxDist: MAX_SHOT_DIST,
     })
@@ -247,5 +278,5 @@ export class Room extends DurableObject {
 }
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color, pos: p.pos, yaw: p.yaw, pitch: p.pitch, pose: p.pose }
+  return { id: p.id, name: p.name, color: p.color, pos: p.pos, yaw: p.yaw, pitch: p.pitch, pose: p.pose, seatId: p.seatId ?? null }
 }

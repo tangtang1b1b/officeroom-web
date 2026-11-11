@@ -1,5 +1,5 @@
 // 2D 碰撞(俯視 xz)。前後端共用:圓形玩家 vs ROOM 邊界與 COLLIDERS 的 AABB。
-import { ROOM, PLAYER, COLLIDERS, minZAt, WALL_SLANT } from './layout.js'
+import { ROOM, PLAYER, COLLIDERS, minZAt, WALL_SLANT, seatSpot } from './layout.js'
 
 const circleHitsBox = (x, z, radius, box) => {
   const nearestX = Math.max(box.min[0], Math.min(x, box.max[0]))
@@ -69,4 +69,22 @@ export const moveCircle = (x, z, dx, dz, radius = PLAYER.radius) => {
   for (let i = 0; i < 6 && pushOut(pos, radius); i++);
   // 推不出可行位置(極端夾角)就維持原地,避免穿牆
   return isBlocked(pos.x, pos.z, radius) ? { x, z } : pos
+}
+
+// 起身落點:以椅子中心為基準,依序試 後 0.7、右 0.6、左 0.6、後 1.0、前 0.6;都被擋回 null。
+export const standUpSpot = (seatId) => {
+  const s = seatSpot(seatId)
+  if (!s) return null
+  const fx = -Math.sin(s.yaw)
+  const fz = -Math.cos(s.yaw)
+  const rx = Math.cos(s.yaw)
+  const rz = -Math.sin(s.yaw)
+  // [前, 右] 係數
+  const cands = [[-0.7, 0], [0, 0.6], [0, -0.6], [-1.0, 0], [0.6, 0]]
+  for (const [f, r] of cands) {
+    const x = s.x + fx * f + rx * r
+    const z = s.z + fz * f + rz * r
+    if (!isBlocked(x, z, PLAYER.radius)) return { x, z }
+  }
+  return null
 }

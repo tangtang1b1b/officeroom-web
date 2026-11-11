@@ -73,3 +73,21 @@ describe('protocol', () => {
     expect(parseClientMessage('x'.repeat(5000)).ok).toBe(false)
   })
 })
+
+describe('seat join and sit pose', () => {
+  it('accepts seatId and keeps it', () => {
+    const r = p({ type: 'join', name: 'Will', seatId: 'seat-will' })
+    expect(r.ok).toBe(true)
+    expect(r.msg.seatId).toBe('seat-will')
+    expect('seatId' in p({ type: 'join', name: 'Bob' }).msg).toBe(false)
+  })
+  it('rejects bad seatId', () => {
+    expect(p({ type: 'join', name: 'Will', seatId: 5 })).toEqual({ ok: false, error: 'bad seat' })
+    expect(p({ type: 'join', name: 'Will', seatId: 'x'.repeat(33) }).error).toBe('bad seat')
+    expect(p({ type: 'join', name: 'Will', seatId: 'x'.repeat(32) }).ok).toBe(true)
+    expect(p({ type: 'join', seatId: 'seat-1' }).error).toBe('bad name')
+  })
+  it('accepts sit pose', () => {
+    expect(p({ type: 'state', pos: [1, 0, 2], yaw: 0, pitch: 0, pose: 'sit' }).ok).toBe(true)
+  })
+})

@@ -191,3 +191,14 @@ describe('raycastWorld with static chairs', () => {
     expect(hit.objectId).toBeUndefined()
   })
 })
+
+describe('sit pose', () => {
+  const P = [2, 0, 3]
+  it('hits head and torso, misses above', () => {
+    const head = raycastPlayer([2, 1.25, 0], [0, 0, 1], P, 'sit', 50)
+    expect(head.part).toBe('head')
+    const torso = raycastPlayer([2, 0.8, 0], [0, 0, 1], P, 'sit', 50)
+    expect(torso.part).toBe('torso')
+    expect(raycastPlayer([2, 1.6, 0], [0, 0, 1], P, 'sit', 50)).toBeNull()
+  })
+})
