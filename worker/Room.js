@@ -3,9 +3,18 @@
 // 遊戲連線期間本來就需要持續運作,Hibernation 會在閒置時清空記憶體且需另外序列化 attachment,徒增複雜度。
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
-import { SPAWN_POINTS } from '../shared/layout.js'
+import { SPAWN_POINTS, DYNAMIC_DEFS, COLLIDERS, ROOM, PLAYER } from '../shared/layout.js'
 import { MAX_PLAYERS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
+import {
+  createObjects,
+  resetObjects,
+  stepObjects,
+  tickStanding,
+  applyImpulse,
+  pushObjectsAround,
+  publicObject,
+} from '../shared/physics.js'
 import {
   checkAdmission,
   isIdle,
@@ -23,12 +32,17 @@ import {
   evaluateMove,
   isShootOriginValid,
   spawnYaw,
+  refundMove,
+  pickSpawnPoint,
 } from './rules.js'
 
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
 const BROADCAST_MS = 50
 const CORRECT_MIN_INTERVAL_MS = 100
 const MAX_SHOT_DIST = 100
+const SHOT_IMPULSE = 1.6
+const PUSH_DT_MIN = 0.016
+const PUSH_DT_MAX = 0.2
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -38,6 +52,9 @@ export class Room extends DurableObject {
     this.nextId = 1
     this.timer = null
     this.idleTimer = null
+    this.objects = createObjects(DYNAMIC_DEFS)
+    this.pendingObjectIds = new Set() // 射擊/玩家推動造成、需在下一次 snapshot 廣播的物件
+    this.lastTickAt = 0
   }
 
   async fetch(request) {
@@ -125,32 +142,29 @@ export class Room extends DurableObject {
       id: session.id,
       you: { pos: session.pos, yaw: session.yaw },
       players: [...this.players.values()].map(publicPlayer),
+      objects: this.objects.map(publicObject),
     })
     this.broadcast({ type: S2C.PLAYER_JOIN, player: publicPlayer(session) }, session.id)
     this.startTimer()
   }
 
-  // 選離現有玩家最遠的出生點
+  // 選離現有玩家最遠、且不與物件重疊的出生點
   pickSpawn() {
-    let best = SPAWN_POINTS[0]
-    let bestScore = -1
-    for (const sp of SPAWN_POINTS) {
-      let score = Infinity
-      for (const p of this.players.values()) {
-        score = Math.min(score, Math.hypot(p.pos[0] - sp.x, p.pos[2] - sp.z))
-      }
-      if (score > bestScore) {
-        bestScore = score
-        best = sp
-      }
-    }
-    return best
+    return pickSpawnPoint(SPAWN_POINTS, [...this.players.values()].map((p) => p.pos), this.objects)
   }
 
   onState(p, msg, now) {
     if (!rateAllow(p.stateLimiter, now, STATE_MAX_PER_SEC)) return
     const result = evaluateMove(p, msg.pos, now)
-    if (result.ok) {
+    let accepted = result.ok
+    if (accepted) {
+      const dt = Math.min(PUSH_DT_MAX, Math.max(PUSH_DT_MIN, (now - (p.lastStateAt || now - 50)) / 1000))
+      const vel = [(result.pos[0] - p.pos[0]) / dt, (result.pos[2] - p.pos[2]) / dt]
+      accepted = this.pushObjects(result.pos, vel, p.pos)
+      if (!accepted) refundMove(p.move, result.cost)
+    }
+    p.lastStateAt = now
+    if (accepted) {
       p.pos = result.pos
     } else if (now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
       p.lastCorrect = now
@@ -159,6 +173,13 @@ export class Room extends DurableObject {
     p.yaw = msg.yaw
     p.pitch = msg.pitch
     p.pose = msg.pose
+  }
+
+  // 玩家移到 pos 時推開重疊的物件;任一推不動則回滾並回傳 false
+  pushObjects(pos, vel, prevPos) {
+    const res = pushObjectsAround(this.objects, pos, vel, prevPos, COLLIDERS, ROOM)
+    for (const id of res.moved) this.pendingObjectIds.add(id)
+    return res.ok
   }
 
   onChat(p, msg, now) {
@@ -177,6 +198,7 @@ export class Room extends DurableObject {
     const hit = raycastWorld(msg.origin, msg.dir, {
       players: [...this.players.values()],
       ignoreId: p.id,
+      objects: this.objects,
       maxDist: MAX_SHOT_DIST,
     })
     if (!hit) return
@@ -189,6 +211,14 @@ export class Room extends DurableObject {
       color: p.color,
     }
     if (hit.kind === 'player') paint.targetId = hit.targetId
+    if (hit.kind === 'object') {
+      paint.objectId = hit.objectId
+      const obj = this.objects.find((o) => o.id === hit.objectId)
+      if (obj) {
+        applyImpulse(obj, msg.dir, SHOT_IMPULSE, now)
+        this.pendingObjectIds.add(obj.id)
+      }
+    }
     this.broadcast(paint)
   }
 
@@ -207,7 +237,11 @@ export class Room extends DurableObject {
     try {
       session.ws.close()
     } catch {}
-    if (this.players.size === 0) this.stopTimer()
+    if (this.players.size === 0) {
+      this.stopTimer()
+      resetObjects(this.objects, DYNAMIC_DEFS)
+      this.pendingObjectIds.clear()
+    }
   }
 
   startTimer() {
@@ -220,8 +254,20 @@ export class Room extends DurableObject {
       }, IDLE_CHECK_MS)
     }
     if (this.timer) return
+    this.lastTickAt = Date.now()
     this.timer = setInterval(() => {
-      this.broadcast({ type: S2C.SNAPSHOT, players: [...this.players.values()].map(publicPlayer) })
+      const now = Date.now()
+      const dt = Math.min(0.2, Math.max(0, (now - this.lastTickAt) / 1000))
+      this.lastTickAt = now
+      const ids = new Set(this.pendingObjectIds)
+      this.pendingObjectIds.clear()
+      for (const id of tickStanding(this.objects, now)) ids.add(id)
+      for (const id of stepObjects(this.objects, dt, COLLIDERS, ROOM)) ids.add(id)
+      this.broadcast({
+        type: S2C.SNAPSHOT,
+        players: [...this.players.values()].map(publicPlayer),
+        objects: this.objects.filter((o) => ids.has(o.id)).map(publicObject),
+      })
     }, BROADCAST_MS)
   }
 

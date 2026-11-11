@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { raycastBoxes, raycastPlayer, raycastRoom, raycastWorld } from '../shared/raycast.js'
 import { COLLIDERS, ROOM } from '../shared/layout.js'
+import { createObjects } from '../shared/physics.js'
 
 const close = (a, b) => expect(a).toBeCloseTo(b, 5)
 
@@ -15,7 +16,7 @@ describe('raycastBoxes', () => {
 
   it('returns nearest box and side normal', () => {
     const hit = raycastBoxes([0, 0.5, -4.5], [0, 0, 1], COLLIDERS, 20)
-    expect(hit.box.id).toMatch(/^chair/)
+    expect(hit.box.id).toMatch(/^desk/)
     expect(hit.normal).toEqual([0, 0, -1])
   })
 
@@ -134,5 +135,28 @@ describe('raycastWorld', () => {
   it('player behind a desk/chair is blocked', () => {
     const hit = raycastWorld([0, 0.6, -4.5], [0, 0, 1], { players: [{ id: 'b', pos: [0, 0, -1], pose: 'stand' }] })
     expect(hit.kind).toBe('box')
+  })
+})
+
+describe('raycastWorld with objects', () => {
+  const objects = createObjects([
+    { id: 'o1', kind: 'chair', x: 5.5, z: 0, yaw: 0, radius: 0.3, height: 1.25, mass: 1, canFall: true },
+  ])
+  it('hits an object and reports objectId', () => {
+    const hit = raycastWorld([4, 0.6, 0], [1, 0, 0], { objects })
+    expect(hit.kind).toBe('object')
+    expect(hit.objectId).toBe('o1')
+    close(hit.distance, 1.2)
+    expect(hit.normal).toEqual([-1, 0, 0])
+  })
+  it('fallen object is low: high shot passes over, low shot hits', () => {
+    objects[0].state = 'down'
+    expect(raycastWorld([4, 1.0, 0], [1, 0, 0], { objects }).kind).toBe('wall')
+    expect(raycastWorld([4, 0.3, 0], [1, 0, 0], { objects }).kind).toBe('object')
+    objects[0].state = 'up'
+  })
+  it('nearer player wins over object', () => {
+    const hit = raycastWorld([4, 1, 0], [1, 0, 0], { objects, players: [{ id: 'p', pos: [4.6, 0, 0], pose: 'stand' }] })
+    expect(hit.kind).toBe('player')
   })
 })

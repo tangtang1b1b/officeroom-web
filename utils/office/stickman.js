@@ -55,9 +55,20 @@ export const createStickman = (color = 0x2d9cdb) => {
   const torsoMesh = new THREE.Mesh(track(new THREE.CylinderGeometry(0.05, 0.05, TORSO, 8)), material)
   torsoMesh.position.y = TORSO / 2
   torso.add(torsoMesh)
+  // 頭以脖子為轉軸,可隨視線上下轉動;兩個小眼睛標示朝向
+  const neck = new THREE.Group()
+  neck.position.y = TORSO
+  torso.add(neck)
   const head = new THREE.Mesh(track(new THREE.SphereGeometry(0.13, 16, 12)), material)
-  head.position.y = TORSO + 0.13
-  torso.add(head)
+  head.position.y = 0.13
+  neck.add(head)
+  const eyeGeometry = track(new THREE.SphereGeometry(0.025, 8, 6))
+  const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 })
+  for (const x of [-0.05, 0.05]) {
+    const eye = new THREE.Mesh(eyeGeometry, eyeMaterial)
+    eye.position.set(x, 0.16, -0.115)
+    neck.add(eye)
+  }
 
   const makeArm = (x) => {
     const arm = new THREE.Group()
@@ -81,6 +92,8 @@ export const createStickman = (color = 0x2d9cdb) => {
   let target = POSES.stand
   let pose = 'stand'
   let walkPhase = 0
+  let lookTarget = 0 // 視線上下角度(rad,正為抬頭)
+  let look = 0
 
   const apply = (swing) => {
     hip.position.y = current.hipY
@@ -91,8 +104,9 @@ export const createStickman = (color = 0x2d9cdb) => {
     legL.shin.rotation.x = -current.thigh
     legR.thigh.rotation.x = current.thigh - swing
     legR.shin.rotation.x = -current.thigh
-    armL.rotation.x = current.arm
-    armR.rotation.x = current.arm
+    neck.rotation.x = look * 0.8
+    armL.rotation.x = current.arm + look
+    armR.rotation.x = current.arm + look
     armL.rotation.z = 0.12
     armR.rotation.z = -0.12
   }
@@ -108,12 +122,18 @@ export const createStickman = (color = 0x2d9cdb) => {
       pose = next
       target = POSES[next]
     },
+    // pitch:視線上下角度(rad,正為抬頭);趴姿範圍較小,避免手臂穿進地板
+    setLook(pitch) {
+      const limit = pose === 'prone' ? 0.5 : 1.2
+      lookTarget = Math.max(-limit, Math.min(limit, pitch))
+    },
     // speed:水平移動速度(m/s),用於走路擺腿
     update(dt, speed = 0) {
       const k = 1 - Math.exp(-12 * dt)
       for (const key of Object.keys(target)) {
         current[key] += (target[key] - current[key]) * k
       }
+      look += (lookTarget - look) * (1 - Math.exp(-14 * dt))
       let swing = 0
       if (speed > 0.1 && pose === 'stand') {
         walkPhase += dt * speed * 3
@@ -125,6 +145,7 @@ export const createStickman = (color = 0x2d9cdb) => {
       geometries.forEach((geometry) => geometry.dispose())
       material.dispose()
       darkMaterial.dispose()
+      eyeMaterial.dispose()
     },
   }
 }

@@ -94,8 +94,33 @@ export const COLLIDERS = [
       box(`${desk.id}-monitor`, mon.x, mon.z, mon.w, mon.d, desk.h + mon.y - mon.h / 2, desk.h + mon.y + mon.h / 2),
     ]
   }),
-  ...CHAIRS.map((chair) => box(chair.id, chair.x, chair.z, chair.w, chair.d, 0, CHAIR_COLLIDER_HEIGHT)),
-  ...CRATES.map((crate) => box(crate.id, crate.x, crate.z, crate.w, crate.d, 0, crate.h)),
+]
+
+// 可動物件(椅子、紙箱):由伺服器物理模擬,不屬於固定碰撞 COLLIDERS。
+// 俯視 2D 圓形剛體;椅子 yaw=0 時面向 -z。
+export const DYNAMIC_DEFS = [
+  ...CHAIRS.map((chair) => ({
+    id: chair.id,
+    kind: 'chair',
+    x: chair.x,
+    z: chair.z,
+    yaw: chair.side > 0 ? 0 : Math.PI,
+    radius: 0.3,
+    height: CHAIR_COLLIDER_HEIGHT,
+    mass: 1,
+    canFall: true,
+  })),
+  ...CRATES.map((crate) => ({
+    id: crate.id,
+    kind: 'crate',
+    x: crate.x,
+    z: crate.z,
+    yaw: 0,
+    radius: Math.max(crate.w, crate.d) / 2,
+    height: crate.h,
+    mass: 1.5,
+    canFall: false,
+  })),
 ]
 
 export const SPAWN_POINTS = [

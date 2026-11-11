@@ -2,8 +2,9 @@
 import * as THREE from 'three'
 import { createRemotePlayers } from '~/utils/office/remotePlayers.js'
 import { createPaint } from '~/utils/office/paint.js'
+import { createDynamicObjects } from '~/utils/office/dynamicObjects.js'
 import { useAllStore } from '~/store/all.js'
-import { ROOM, PLAYER, DESKS, CHAIRS, CRATES, PARTITION, MONITOR, partitionOf, monitorOf } from '~/shared/layout.js'
+import { ROOM, PLAYER, DESKS, DYNAMIC_DEFS, PARTITION, MONITOR, partitionOf, monitorOf } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
@@ -35,6 +36,7 @@ let controls
 let network
 let remotes
 let paint
+let objects
 let gun
 let recoil = 0
 let sendTimer = 0
@@ -138,19 +140,6 @@ const buildFurniture = () => {
     addBox(group, [MONITOR.w, MONITOR.h, MONITOR.d], [0, desk.h + MONITOR.y, mon.z - desk.z], 0x111111)
     scene.add(group)
   }
-  for (const chair of CHAIRS) {
-    const group = new THREE.Group()
-    group.position.set(chair.x, 0, chair.z)
-    const facing = chair.z > 0 ? -1 : 1 // 面向桌子
-    addBox(group, [0.5, 0.08, 0.5], [0, 0.48, 0], COLOR.chair)
-    addBox(group, [0.5, 0.55, 0.06], [0, 0.78, -facing * 0.22], COLOR.chair)
-    addBox(group, [0.3, 0.16, 0.08], [0, 1.15, -facing * 0.22], COLOR.chair)
-    addBox(group, [0.06, 0.45, 0.06], [0, 0.22, 0], 0x555555)
-    addBox(group, [0.5, 0.04, 0.5], [0, 0.03, 0], 0x555555)
-    scene.add(group)
-  }
-  // 紙箱(搬家感)
-  for (const crate of CRATES) addBox(scene, [crate.w, crate.h, crate.d], [crate.x, crate.h / 2, crate.z], COLOR.box)
 }
 
 const buildViewmodel = () => {
@@ -210,6 +199,7 @@ const tick = () => {
   gun.rotation.x = recoil * 0.12
 
   remotes.update(dt)
+  objects.update(dt)
   paint.update(dt)
   renderer.render(scene, camera)
 }
@@ -243,10 +233,16 @@ onMounted(() => {
   buildViewmodel()
 
   remotes = createRemotePlayers(scene)
-  paint = createPaint(scene, (id) => remotes.getGroup(id))
+  objects = createDynamicObjects(scene, DYNAMIC_DEFS)
+  // 斑點附著的宿主:被打中的玩家或可動物件
+  paint = createPaint(scene, (msg) => {
+    if (msg.objectId) return objects.getGroup(msg.objectId)
+    if (msg.targetId) return remotes.getGroup(msg.targetId)
+    return null
+  })
 
   controls = usePlayerControls(renderer.domElement)
-  if (import.meta.dev) window.__office = { controls, remotes }
+  if (import.meta.dev) window.__office = { controls, remotes, objects }
   const stop = watch(controls.locked, (value) => (locked.value = value))
   disposables.push({ dispose: stop })
   renderer.domElement.addEventListener('click', controls.requestLock)
@@ -267,6 +263,8 @@ onMounted(() => {
       for (const player of msg.players || []) {
         if (player.id !== store.myId && player.pos) remotes.applyState(player)
       }
+      objects.applyFull(msg.objects)
+      paint.clear()
     },
     playerJoin: (player) => {
       if (player.id === store.myId || !player.pos) return
@@ -274,7 +272,8 @@ onMounted(() => {
       remotes.applyState(player)
     },
     playerLeave: (id) => remotes.remove(id),
-    snapshot: (players) => {
+    snapshot: (players, changedObjects) => {
+      objects.applyUpdate(changedObjects)
       const present = new Set()
       for (const player of players) {
         if (player.id === store.myId || !player.pos) continue
@@ -317,6 +316,7 @@ onBeforeUnmount(() => {
   network?.disconnect()
   controls?.dispose()
   remotes?.dispose()
+  objects?.dispose()
   paint?.dispose()
   disposables.forEach((item) => item.dispose())
   if (import.meta.dev) delete window.__office

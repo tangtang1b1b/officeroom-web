@@ -41,7 +41,7 @@ export const createRemotePlayers = (scene) => {
       man,
       label,
       pose: 'stand',
-      target: { x: 0, z: 0, yaw: 0, pose: 'stand' },
+      target: { x: 0, z: 0, yaw: 0, pitch: 0, pose: 'stand' },
       placed: false,
     }
     players.set(info.id, entry)
@@ -61,7 +61,7 @@ export const createRemotePlayers = (scene) => {
   const applyState = (info) => {
     const entry = players.get(info.id) || add(info)
     const [x, , z] = info.pos
-    entry.target = { x, z, yaw: info.yaw, pose: info.pose }
+    entry.target = { x, z, yaw: info.yaw, pitch: info.pitch ?? 0, pose: info.pose }
     if (!entry.placed) {
       entry.placed = true
       entry.man.group.position.set(x, 0, z)
@@ -83,6 +83,7 @@ export const createRemotePlayers = (scene) => {
         entry.man.setPose(entry.pose)
         entry.label.sprite.position.y = LABEL_HEIGHT[entry.pose]
       }
+      entry.man.setLook(entry.target.pitch)
       entry.man.update(dt, dt > 0 ? (Math.hypot(dx, dz) * k) / dt : 0)
     }
   }

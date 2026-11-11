@@ -5,6 +5,8 @@ import {
   cooldownReady,
   createMoveBucket,
   evaluateMove,
+  refundMove,
+  pickSpawnPoint,
   isShootOriginValid,
   spawnYaw,
   isOriginAllowed,
@@ -22,7 +24,7 @@ import {
   IDLE_TIMEOUT_MS,
 } from '../worker/rules.js'
 import { isBlocked } from '../shared/collision.js'
-import { COLLIDERS, ROOM, PLAYER } from '../shared/layout.js'
+import { COLLIDERS, ROOM, PLAYER, SPAWN_POINTS } from '../shared/layout.js'
 
 const player = (pose = 'stand', pos = [-6, 0, 0], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
 
@@ -212,7 +214,7 @@ describe('collision.isBlocked', () => {
     expect(isBlocked(-6, 0)).toBe(false)
   })
   it('blocks inside collider, free just outside radius', () => {
-    const b = COLLIDERS.find((c) => c.id === 'crate-1')
+    const b = COLLIDERS.find((c) => c.id === 'desk-0--1')
     const cx = (b.min[0] + b.max[0]) / 2
     const cz = (b.min[2] + b.max[2]) / 2
     expect(isBlocked(cx, cz)).toBe(true)
@@ -221,5 +223,38 @@ describe('collision.isBlocked', () => {
   })
   it('custom radius', () => {
     expect(isBlocked(ROOM.maxX - 0.1, 0, 0.05)).toBe(false)
+  })
+})
+
+describe('refundMove', () => {
+  it('returns the spent budget, capped at MOVE_BUDGET_CAP', () => {
+    const p = player()
+    const r = evaluateMove(p, [p.pos[0] + 1, 0, p.pos[2]], p.move.at)
+    expect(r.ok).toBe(true)
+    expect(r.cost).toBeCloseTo(1, 9)
+    const after = p.move.budget
+    refundMove(p.move, r.cost)
+    expect(p.move.budget).toBeCloseTo(after + 1, 9)
+    refundMove(p.move, 100)
+    expect(p.move.budget).toBe(MOVE_BUDGET_CAP)
+    refundMove(p.move, -5)
+    expect(p.move.budget).toBe(MOVE_BUDGET_CAP)
+  })
+})
+
+describe('pickSpawnPoint', () => {
+  const pts = [{ x: 0, z: 0 }, { x: 10, z: 0 }]
+  it('skips candidates overlapping an object', () => {
+    const objs = [{ x: 10.2, z: 0, radius: 0.3 }]
+    expect(pickSpawnPoint(pts, [[8, 0, 0]], objs)).toEqual({ x: 0, z: 0 })
+  })
+  it('falls back to the original logic when all overlap', () => {
+    const objs = [{ x: 0, z: 0, radius: 0.3 }, { x: 10, z: 0, radius: 0.3 }]
+    expect(pickSpawnPoint(pts, [[8, 0, 0]], objs)).toEqual({ x: 0, z: 0 })
+  })
+  it('real spawn points are free of the initial dynamic objects', async () => {
+    const { DYNAMIC_DEFS } = await import('../shared/layout.js')
+    const sp = pickSpawnPoint(SPAWN_POINTS, [], DYNAMIC_DEFS)
+    expect(DYNAMIC_DEFS.some((o) => Math.hypot(o.x - sp.x, o.z - sp.z) < PLAYER.radius + o.radius + 0.05)).toBe(false)
   })
 })

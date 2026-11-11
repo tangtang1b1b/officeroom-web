@@ -74,7 +74,7 @@ GOOGLE_SITE_VERIFICATION=
 1. `npm run worker:dev`(Cloudflare Worker,預設 `ws://localhost:8787/ws`)
 2. `npm run dev`(前端,`.env` 需設定 `WS_URL=ws://localhost:8787/ws`)
 
-操作:WASD 移動、滑鼠視角、左鍵射擊、C 蹲、Z 趴、Enter 聊天、Esc 釋放滑鼠。
+操作:WASD 移動、滑鼠視角、左鍵射擊、C 蹲、Z 趴、Enter 聊天、Esc 釋放滑鼠。椅子與紙箱可以走過去推動,漆彈打到會滑動,椅子重擊(連續命中)會倒下,約 15 秒後自動扶正。
 
 測試:`npm test`。格局資料在 `shared/layout.js`。
 

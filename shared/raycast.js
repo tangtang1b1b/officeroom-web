@@ -1,5 +1,6 @@
 // 射線檢測純函式。dir 需為單位向量。pos 為玩家腳底位置。
 import { ROOM, PLAYER, COLLIDERS } from './layout.js'
+import { objectBox } from './physics.js'
 
 const EPS = 1e-9
 
@@ -152,14 +153,20 @@ export function raycastRoom(origin, dir, maxDist = Infinity) {
 }
 
 // 整體檢測:房間、家具、玩家(略過 ignoreId)。
-// players: [{ id, pos, pose, yaw }]。回傳 { kind: 'wall'|'box'|'player', distance, point, normal, targetId? } 或 null
-export function raycastWorld(origin, dir, { players = [], ignoreId = null, boxes = COLLIDERS, maxDist = 100 } = {}) {
+// players: [{ id, pos, pose, yaw }]。回傳 { kind: 'wall'|'box'|'object'|'player', distance, point, normal, targetId?, objectId? } 或 null
+export function raycastWorld(origin, dir, { players = [], ignoreId = null, boxes = COLLIDERS, objects = [], maxDist = 100 } = {}) {
   let best = null
   const room = raycastRoom(origin, dir, maxDist)
   if (room) best = { kind: 'wall', ...room }
   const box = raycastBoxes(origin, dir, boxes, best ? best.distance : maxDist)
   if (box && (!best || box.distance < best.distance)) {
     best = { kind: 'box', distance: box.distance, point: box.point, normal: box.normal, boxId: box.box.id }
+  }
+  if (objects.length) {
+    const hit = raycastBoxes(origin, dir, objects.map(objectBox), best ? best.distance : maxDist)
+    if (hit && (!best || hit.distance < best.distance)) {
+      best = { kind: 'object', distance: hit.distance, point: hit.point, normal: hit.normal, objectId: hit.box.id }
+    }
   }
   for (const p of players) {
     if (p.id === ignoreId) continue

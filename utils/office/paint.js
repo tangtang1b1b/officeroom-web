@@ -5,7 +5,8 @@ const TRACER_LIFE = 0.12
 const FORWARD = new THREE.Vector3(0, 0, 1)
 
 // 漆彈斑點(貼在牆、家具或玩家身上)與彈道
-export const createPaint = (scene, getPlayerGroup) => {
+// getHost(msg):回傳斑點要附著的群組(被打中的玩家或可動物件),沒有則為 null
+export const createPaint = (scene, getHost) => {
   const splatGeometry = new THREE.CircleGeometry(1, 20)
   const materials = new Map()
   const splats = []
@@ -30,7 +31,8 @@ export const createPaint = (scene, getPlayerGroup) => {
 
   const removeSplat = (group) => group.parent?.remove(group)
 
-  const addSplat = ({ pos, normal, color, targetId }) => {
+  const addSplat = (msg) => {
+    const { pos, normal, color } = msg
     const material = materialFor(color)
     const group = new THREE.Group()
     const main = new THREE.Mesh(splatGeometry, material)
@@ -49,7 +51,7 @@ export const createPaint = (scene, getPlayerGroup) => {
     group.quaternion.setFromUnitVectors(FORWARD, n)
     group.rotateZ(Math.random() * Math.PI * 2)
 
-    const host = targetId ? getPlayerGroup(targetId) : null
+    const host = getHost(msg)
     scene.add(group)
     if (host) host.attach(group) // 保留世界座標,之後跟著玩家移動
 
@@ -79,9 +81,16 @@ export const createPaint = (scene, getPlayerGroup) => {
     }
   }
 
+  // 重連時房間可能已重置,清掉所有斑點(牆、家具、玩家與物件上的)
+  const clear = () => {
+    splats.forEach(removeSplat)
+    splats.length = 0
+  }
+
   return {
     addSplat,
     addTracer,
+    clear,
     update,
     dispose() {
       splats.forEach(removeSplat)

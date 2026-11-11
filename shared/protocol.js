@@ -24,14 +24,15 @@ export const S2C = {
 }
 
 // 最終伺服器訊息格式(pos 皆為 [x,y,z]):
-// welcome     { type, id, you:{pos,yaw}, players:[Player] }
+// welcome     { type, id, you:{pos,yaw}, players:[Player], objects:[Obj] }
 // player_join { type, player:Player }
 // player_leave{ type, id }
-// snapshot    { type, players:[Player] }
+// snapshot    { type, players:[Player], objects:[Obj] }  objects 僅含醒著/剛睡著/狀態改變者
 // chat        { type, from:name, text }
-// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId? }
+// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, objectId? }
 // correct     { type, pos:[x,y,z] }
 // error       { type, error }
+// Obj = { id, x, z, yaw, state:'up'|'down' }(x/z/yaw 四捨五入到 3 位)
 // Player = { id, name, color, pos, yaw, pitch, pose }
 
 export const MAX_PITCH = 1.5

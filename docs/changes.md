@@ -129,3 +129,14 @@
 - 修改摘要：以 `vercel domains add` 將 `officeroom-web.vercel.app` 加入專案 `officeroom`；Worker `ALLOWED_ORIGINS` 改為 `https://officeroom-web.vercel.app` 並重新部署。
 - 驗證結果：新網址回 200 且含新 Worker 位址；`ws` 實測新 Origin 可連，舊網址 `dangeride.vercel.app`、其他來源與無 Origin 皆 403；在瀏覽器開新網址輸入暱稱後成功進入辦公室並連線(線上 1 / 10)。
 - 舊網域 `dangeride.vercel.app` 已以 `vercel alias rm` 移除(現回 404)。
+
+## 2026-11-11：視線上下同步與簡化版物理
+
+- 需求：其他玩家要能看到你上下看的視線；椅子與紙箱可以被推動，被漆彈打到會滑動、椅子重擊會倒下並在 15 秒後扶正。
+- 修改摘要：
+  - 視線：火柴人頭部改為可轉動並加上眼睛，`setLook(pitch)` 讓頭與雙臂(連槍)跟著上下轉；`remotePlayers.js` 接上原本被丟掉的 `pitch`。
+  - 物理：新增 `shared/physics.js`(俯視 2D 圓形剛體：摩擦、牆與固定物碰撞、物件互推、睡眠、衝量、倒下與扶正、玩家推動)；`shared/layout.js` 新增 `DYNAMIC_DEFS`，椅子與紙箱移出固定 `COLLIDERS`；`raycastWorld` 可命中物件；`worker/Room.js` 在 50ms 計時器內模擬並於 `welcome`/`snapshot` 廣播 `objects`，`paint` 帶 `objectId`。
+  - 前端：新增 `utils/office/dynamicObjects.js`(平滑移動、倒下傾倒動畫)，斑點可附著在物件上跟著移動；重連時清除舊斑點。
+- 審查修正：物件速度上限 8 m/s(避免多人協力射擊穿桌)、被物件卡住的玩家可往外走且新玩家不生在物件內、推不動物件而被拒時退還移動額度、衝量依水平分量縮放且單發只滑動(連續命中才倒)、倒下椅子的射線判定框變大、玩家推動時保留物件原速度。
+- 驗證結果：以 `ws` 腳本與雙分頁實測：`welcome` 帶 14 個物件，玩家走過去能把椅子推走且不被拉回，射擊椅子廣播含 `objectId` 的 `paint`、椅子滑動轉向後倒下，約 15 秒後扶正；瀏覽器畫面確認側倒椅子、紅綠斑點附著並跟著移動，另一玩家抬頭時手臂與頭上舉。
+- 限制：物件判定以圓形腳印與外接方塊近似，不處理椅子旋轉後的真實輪廓；物件位置由伺服器 50ms 快照平滑，網路抖動時有延遲感；免費方案的 Durable Object 運算與訊息量需上線後觀察。
