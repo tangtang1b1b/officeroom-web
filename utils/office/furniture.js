@@ -265,7 +265,7 @@ const buildLocker = (g, f, k) => {
   const front = 1
   const lip = 0.03
   const bodyColor = 0x8a9096
-  k.box(g, [w, h, d - lip], [0, h / 2, -front * lip / 2], bodyColor)
+  k.box(g, [w, h - 0.04, d - lip], [0, (h - 0.04) / 2, -front * lip / 2], bodyColor) // 頂面留給桌板,避免共面閃爍
   k.box(g, [w, 0.04, d - lip], [0, h - 0.02, -front * lip / 2], 0xb9bec3) // 桌板
   k.box(g, [w - 0.04, 0.05, d - lip - 0.02], [0, 0.025, -front * lip / 2], 0x5a5f65) // 踢腳
   const faceZ = front * (d / 2 - lip + 0.0075)

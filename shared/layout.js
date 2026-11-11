@@ -14,7 +14,7 @@ export const ROOM = {
 }
 
 export const PLAYER = {
-  radius: 0.3,
+  radius: 0.2, // 碰撞圓半徑(比肩寬小,過走道與門不易卡住)
   // 各姿勢的身體高度與眼睛高度(須與 utils/office/stickman.js 的模型一致)
   bodyHeight: { stand: 1.75, crouch: 1.3, prone: 0.3 },
   eyeHeight: { stand: 1.6, crouch: 1.15, prone: 0.4 },

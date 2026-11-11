@@ -29,7 +29,7 @@ import {
 const COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
 const BROADCAST_MS = 50
 const CORRECT_MIN_INTERVAL_MS = 100
-const MAX_SHOT_DIST = 100
+const MAX_SHOT_DIST = 25
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -169,7 +169,8 @@ export class Room extends DurableObject {
       ignoreId: p.id,
       maxDist: MAX_SHOT_DIST,
     })
-    if (!hit) return
+    // 漆彈只能打人:打到牆或家具不產生斑點
+    if (!hit || hit.kind !== 'player') return
     const paint = {
       type: S2C.PAINT,
       from: p.id,
@@ -178,10 +179,8 @@ export class Room extends DurableObject {
       normal: hit.normal,
       color: p.color,
     }
-    if (hit.kind === 'player') {
-      paint.targetId = hit.targetId
-      if (hit.part) paint.part = hit.part
-    }
+    paint.targetId = hit.targetId
+    if (hit.part) paint.part = hit.part
     this.broadcast(paint)
   }
 

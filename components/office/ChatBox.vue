@@ -34,18 +34,17 @@ const close = () => {
 }
 const submit = () => {
   const value = text.value.trim()
-  if (value) emit('send', value.slice(0, 200))
+  if (!value) {
+    close() // 輸入框空白時再按 Enter:關閉聊天,回到準心
+    return
+  }
+  emit('send', value.slice(0, 200))
   text.value = ''
   scrollBottom()
 }
 
 const onKeydown = (event) => {
   if (event.isComposing) return // 注音/輸入法選字中的 Esc、Enter 不處理
-  if (event.code === 'Escape' && isOpen.value) {
-    event.preventDefault()
-    close()
-    return
-  }
   if (event.code !== 'Enter' && event.code !== 'NumpadEnter') return
   if (isOpen.value) return
   event.preventDefault()
@@ -84,7 +83,7 @@ defineExpose({ open, close, isOpen })
         <p class="font-bold">辦公室聊天室</p>
         <p class="text-xs text-neutral-500">線上 {{ roster.length }} / 10</p>
       </div>
-      <button class="rounded-full px-2 py-1 text-lg leading-none text-neutral-500 hover:bg-neutral-100" title="關閉(Esc)" @click="close">
+      <button class="rounded-full px-2 py-1 text-lg leading-none text-neutral-500 hover:bg-neutral-100" title="關閉" @click="close">
         ×
       </button>
     </header>
@@ -117,7 +116,7 @@ defineExpose({ open, close, isOpen })
         ref="input"
         v-model="text"
         maxlength="200"
-        placeholder="輸入訊息,Enter 送出,Esc 關閉"
+        placeholder="輸入訊息,Enter 送出;空白時按 Enter 關閉"
         class="min-w-0 flex-1 rounded-lg bg-neutral-100 px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
       />
       <button type="submit" class="rounded-lg bg-yellow-400 px-4 font-bold text-black">送出</button>

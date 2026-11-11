@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SPAWN_POINTS, CHAIRS, CRATES, COLLIDERS, DESKS, WALLS, FIXTURES, ROOM } from '../shared/layout.js'
+import { PLAYER, SPAWN_POINTS, CHAIRS, CRATES, COLLIDERS, DESKS, WALLS, FIXTURES, ROOM } from '../shared/layout.js'
 import { isBlocked } from '../shared/collision.js'
 
 describe('office layout', () => {
@@ -59,7 +59,7 @@ describe('office layout', () => {
   })
   it('chairs carry yaw from side; spawns are clear of chair colliders', () => {
     for (const c of CHAIRS) expect(c.yaw).toBe(c.side > 0 ? 0 : Math.PI)
-    for (const p of SPAWN_POINTS) expect(isBlocked(p.x, p.z, 0.3 + 0.3)).toBe(false)
+    for (const p of SPAWN_POINTS) expect(isBlocked(p.x, p.z, PLAYER.radius + 0.3)).toBe(false)
   })
   it('aisles between desk clusters are at least 1.2 m wide', () => {
     const gap = (a, b) => Math.hypot(Math.max(Math.abs(a.x - b.x) - (a.w + b.w) / 2, 0), Math.max(Math.abs(a.z - b.z) - (a.d + b.d) / 2, 0))

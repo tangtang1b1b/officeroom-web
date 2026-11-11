@@ -4,6 +4,57 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 const MAX_SPLATS = 150
 const TRACER_LIFE = 0.12
 const FORWARD = new THREE.Vector3(0, 0, 1)
+const BALL_SPEED = 45 // 漆彈飛行速度(公尺/秒)
+const VARIANTS = 4
+
+// 圓形漆點貼圖(白色 + alpha,實際顏色由材質染色):4 種外觀,邊緣不規則並帶小水滴
+const makeSplatTexture = (variant) => {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#fff'
+  const c = size / 2
+  const blob = (r, bumps, jitter) => {
+    ctx.beginPath()
+    const phase = Math.random() * 6.28
+    for (let i = 0; i <= 48; i++) {
+      const a = (i / 48) * Math.PI * 2
+      const rr = r * (1 + jitter * Math.sin(a * bumps + phase) + jitter * 0.5 * Math.sin(a * (bumps + 3) + phase * 2))
+      const x = c + Math.cos(a) * rr
+      const y = c + Math.sin(a) * rr
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.closePath()
+    ctx.fill()
+  }
+  const dot = (angle, dist, r) => {
+    ctx.beginPath()
+    ctx.arc(c + Math.cos(angle) * dist, c + Math.sin(angle) * dist, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  if (variant === 0) {
+    blob(34, 7, 0.1) // 圓潤大點
+    for (let i = 0; i < 5; i++) dot(Math.random() * 6.28, 44 + Math.random() * 10, 2 + Math.random() * 3)
+  } else if (variant === 1) {
+    blob(28, 9, 0.22) // 帶放射狀鋸齒
+    for (let i = 0; i < 8; i++) dot(Math.random() * 6.28, 38 + Math.random() * 18, 1.5 + Math.random() * 3.5)
+  } else if (variant === 2) {
+    blob(22, 5, 0.15) // 小點加大水滴環
+    for (let i = 0; i < 10; i++) dot((i / 10) * 6.28 + Math.random() * 0.4, 36 + Math.random() * 14, 3 + Math.random() * 5)
+  } else {
+    blob(30, 6, 0.12) // 主點加往下流的漆
+    ctx.beginPath()
+    ctx.ellipse(c + (Math.random() - 0.5) * 20, c + 40, 5, 16, 0, 0, Math.PI * 2)
+    ctx.fill()
+    dot(Math.PI / 2, 58, 4)
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
 
 // 漆彈斑點(貼在牆、家具或玩家身上)與彈道
 // getHost(msg):回傳斑點要附著的群組(被打中的玩家或可動物件),沒有則為 null
@@ -12,13 +63,20 @@ export const createPaint = (scene, getHost) => {
   const splats = []
   const tracers = []
 
+  const textures = []
   const materialFor = (color) => {
-    const key = new THREE.Color(color).getHexString()
+    if (!textures.length) for (let i = 0; i < VARIANTS; i++) textures.push(makeSplatTexture(i))
+    const variant = Math.floor(Math.random() * VARIANTS)
+    const key = `${new THREE.Color(color).getHexString()}-${variant}`
     if (!materials.has(key)) {
       materials.set(
         key,
         new THREE.MeshBasicMaterial({
           color: new THREE.Color(color),
+          map: textures[variant],
+          transparent: true,
+          alphaTest: 0.4,
+          depthWrite: false,
           side: THREE.DoubleSide,
           polygonOffset: true,
           polygonOffsetFactor: -2,
@@ -152,10 +210,7 @@ export const createPaint = (scene, getHost) => {
 
     // 身體方塊較小,斑點縮小
     const scale = onBody ? (onBody.mesh.userData.part === 'torso' ? 0.7 : 0.45) : 1
-    const main = (0.12 + Math.random() * 0.08) * scale
-    const sizes = [main]
-    const drops = onBody ? 2 : 3
-    for (let i = 0; i < drops; i++) sizes.push((0.03 + Math.random() * 0.03) * scale)
+    const sizes = [(0.2 + Math.random() * 0.1) * scale] // 水滴已畫在貼圖內
 
     let targets
     let attach = true
@@ -185,6 +240,18 @@ export const createPaint = (scene, getHost) => {
     tracers.push({ line, life: TRACER_LIFE })
   }
 
+  // 飛行中的漆彈:從 origin 飛到 end,抵達後呼叫 onHit
+  const balls = []
+  const ballGeometry = new THREE.SphereGeometry(0.035, 10, 8)
+  const addProjectile = (origin, end, color, onHit) => {
+    const mesh = new THREE.Mesh(ballGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(color) }))
+    const from = new THREE.Vector3(...origin)
+    const to = new THREE.Vector3(...end)
+    mesh.position.copy(from)
+    scene.add(mesh)
+    balls.push({ mesh, from, to, t: 0, duration: Math.max(0.03, from.distanceTo(to) / BALL_SPEED), onHit })
+  }
+
   const inScene = (object) => {
     let node = object
     while (node.parent) node = node.parent
@@ -197,6 +264,18 @@ export const createPaint = (scene, getHost) => {
       if (!inScene(splats[i][0])) {
         removeSplat(splats[i])
         splats.splice(i, 1)
+      }
+    }
+    for (let i = balls.length - 1; i >= 0; i--) {
+      const ball = balls[i]
+      ball.t += dt
+      const k = Math.min(1, ball.t / ball.duration)
+      ball.mesh.position.lerpVectors(ball.from, ball.to, k)
+      if (k >= 1) {
+        scene.remove(ball.mesh)
+        ball.mesh.material.dispose()
+        balls.splice(i, 1)
+        ball.onHit?.()
       }
     }
     for (let i = tracers.length - 1; i >= 0; i--) {
@@ -216,11 +295,17 @@ export const createPaint = (scene, getHost) => {
   const clear = () => {
     splats.forEach(removeSplat)
     splats.length = 0
+    balls.forEach((b) => {
+      scene.remove(b.mesh)
+      b.mesh.material.dispose()
+    })
+    balls.length = 0
   }
 
   return {
     addSplat,
     addTracer,
+    addProjectile,
     clear,
     update,
     dispose() {
@@ -232,7 +317,14 @@ export const createPaint = (scene, getHost) => {
         t.line.material.dispose()
       })
       tracers.length = 0
+      balls.forEach((b) => {
+        scene.remove(b.mesh)
+        b.mesh.material.dispose()
+      })
+      balls.length = 0
+      ballGeometry.dispose()
       materials.forEach((m) => m.dispose())
+      textures.forEach((t) => t.dispose())
     },
   }
 }

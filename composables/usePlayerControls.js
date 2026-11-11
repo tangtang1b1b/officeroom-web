@@ -1,14 +1,15 @@
 import { PLAYER, SPAWN_POINTS } from '~/shared/layout.js'
 import { isBlocked } from '~/shared/collision.js'
 
-const MOUSE_SENSITIVITY = 0.0022
+const MOUSE_SENSITIVITY = 0.0035
 const MAX_PITCH = 1.45
 
 const isTyping = (target) =>
   target instanceof HTMLElement &&
   (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
 
-// 第一人稱操控:Pointer Lock 視角 + WASD 移動 + C 蹲 / Z 趴(再按一次起身)
+// 第一人稱操控:點畫面後滑鼠鎖定,移動滑鼠即轉視角,準心在畫面中央;WASD 移動、C 蹲 / Z 趴。
+// Esc(瀏覽器規定會解除鎖定)只是讓游標出現以便點按鈕,WASD 仍可移動,遊戲不暫停;點畫面再鎖定。
 export const usePlayerControls = (element) => {
   const spawn = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)]
   const state = {
@@ -40,7 +41,6 @@ export const usePlayerControls = (element) => {
   }
   const onLockChange = () => {
     locked.value = document.pointerLockElement === element
-    if (!locked.value) keys.clear()
   }
 
   window.addEventListener('keydown', onKeyDown)
@@ -52,12 +52,10 @@ export const usePlayerControls = (element) => {
   const update = (dt) => {
     let forward = 0
     let strafe = 0
-    if (locked.value) {
-      if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1
-      if (keys.has('KeyS') || keys.has('ArrowDown')) forward -= 1
-      if (keys.has('KeyD') || keys.has('ArrowRight')) strafe += 1
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) strafe -= 1
-    }
+    if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1
+    if (keys.has('KeyS') || keys.has('ArrowDown')) forward -= 1
+    if (keys.has('KeyD') || keys.has('ArrowRight')) strafe += 1
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) strafe -= 1
     const length = Math.hypot(forward, strafe)
     if (length === 0) {
       state.speed = 0
@@ -78,10 +76,9 @@ export const usePlayerControls = (element) => {
   return {
     state,
     locked,
-    // Esc 後立刻再鎖定會被瀏覽器拒絕,忽略即可,使用者點擊畫面會再鎖定
     requestLock: () => {
       try {
-        element.requestPointerLock?.()?.catch?.(() => {})
+        element.requestPointerLock?.()?.catch?.(() => {}) // Esc 後立刻再鎖會被瀏覽器拒絕,忽略
       } catch {
         // 忽略
       }

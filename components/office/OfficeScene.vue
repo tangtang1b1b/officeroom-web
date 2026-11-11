@@ -15,6 +15,8 @@ const store = useAllStore()
 const host = ref(null)
 const chatBox = ref(null)
 const locked = ref(false)
+const hovering = ref(false) // 游標是否正指著別的玩家
+const cursor = ref({ x: 0, y: 0 })
 const poseLabel = ref('站立')
 const hitFlash = ref({ key: 0, color: '#ffffff' })
 const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下' }
@@ -29,6 +31,7 @@ const colorCss = (color) => (typeof color === 'number' ? `#${color.toString(16).
 
 const SEND_INTERVAL = 0.05
 const FIRE_INTERVAL = 0.18
+const MAX_AIM_DIST = 20 // 超過這個距離不能射擊(須小於伺服器 MAX_SHOT_DIST)
 
 let renderer
 let scene
@@ -42,6 +45,13 @@ let recoil = 0
 let sendTimer = 0
 let fireTimer = 0
 let firing = false
+let hoverHit = null // { point, id }
+let staticMeshes = []
+const raycaster = new THREE.Raycaster()
+const pointer = new THREE.Vector2()
+const owners = new Map()
+const candidates = []
+let pointerInside = false
 let animationFrame
 let resizeObserver
 let clock
@@ -198,11 +208,30 @@ const buildFurniture = () => {
 const buildViewmodel = () => {
   // 第一人稱手上的漆彈槍
   gun = new THREE.Group()
-  addBox(gun, [0.06, 0.08, 0.38], [0, 0, -0.1], 0x2b2b2b)
-  addBox(gun, [0.04, 0.04, 0.14], [0, 0.02, -0.34], 0xf2b705)
-  addBox(gun, [0.05, 0.12, 0.05], [0, -0.09, 0.02], 0x2b2b2b)
-  gun.scale.setScalar(0.6)
-  gun.position.set(0.2, -0.2, -0.5)
+  const cyl = (r, len, pos, color, rotX = Math.PI / 2) => {
+    const geometry = new THREE.CylinderGeometry(r, r, len, 12)
+    const material = new THREE.MeshLambertMaterial({ color })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.set(...pos)
+    mesh.rotation.x = rotX
+    gun.add(mesh)
+    disposables.push(geometry, material)
+  }
+  addBox(gun, [0.07, 0.1, 0.24], [0, 0, 0], 0x2b2b2b) // 機身
+  addBox(gun, [0.05, 0.13, 0.06], [0, -0.1, 0.07], 0x1c1c1c) // 握把
+  addBox(gun, [0.03, 0.04, 0.05], [0, -0.05, -0.02], 0x1c1c1c) // 扳機護圈
+  cyl(0.022, 0.42, [0, 0.02, -0.3], 0x3a3a3a) // 槍管
+  cyl(0.03, 0.05, [0, 0.02, -0.5], 0xf2b705) // 槍口環
+  cyl(0.035, 0.22, [0, -0.07, -0.18], 0x9aa0a6) // 壓縮空氣瓶
+  const hopperGeometry = new THREE.SphereGeometry(0.075, 14, 10)
+  const hopperMaterial = new THREE.MeshLambertMaterial({ color: 0xe8453c, transparent: true, opacity: 0.9 })
+  const hopper = new THREE.Mesh(hopperGeometry, hopperMaterial) // 彈鬥(裝漆彈的圓罐)
+  hopper.position.set(0, 0.13, -0.02)
+  gun.add(hopper)
+  disposables.push(hopperGeometry, hopperMaterial)
+  addBox(gun, [0.02, 0.03, 0.08], [0, 0.07, -0.12], 0x1c1c1c) // 瞄具
+  gun.scale.setScalar(0.75)
+  gun.position.set(0.22, -0.22, -0.55)
   gun.traverse((o) => {
     if (o.isMesh) o.userData.paintable = false // 槍是相機的一部分,不能被貼花
   })
@@ -218,12 +247,43 @@ const resize = () => {
   camera.updateProjectionMatrix()
 }
 
+// 從游標位置射出射線,找出最前面的玩家(被牆或家具擋住就算沒指到)
+const updateHover = () => {
+  hoverHit = null
+  if (controls.locked.value) {
+    // 滑鼠鎖定時準心在畫面中央
+    pointer.set(0, 0)
+    pointerInside = true
+    cursor.value = { x: host.value.clientWidth / 2, y: host.value.clientHeight / 2 }
+  }
+  if (!pointerInside || !remotes) return
+  owners.clear()
+  candidates.length = 0
+  for (const id of remotes.ids()) {
+    for (const mesh of remotes.getGroup(id)?.userData.bodyMeshes || []) {
+      owners.set(mesh, id)
+      candidates.push(mesh)
+    }
+  }
+  if (candidates.length) {
+    for (const mesh of staticMeshes) candidates.push(mesh)
+    raycaster.setFromCamera(pointer, camera)
+    raycaster.far = 60
+    const hit = raycaster.intersectObjects(candidates, false)[0]
+    if (hit && hit.distance <= MAX_AIM_DIST && owners.has(hit.object)) hoverHit = { point: hit.point.clone(), id: owners.get(hit.object) }
+  }
+  if (hovering.value !== !!hoverHit) hovering.value = !!hoverHit
+}
+
 const shoot = () => {
+  if (!hoverHit) return
   const { state } = controls
-  const dir = new THREE.Vector3()
-  camera.getWorldDirection(dir)
-  // 起點用姿勢對應的標準眼高(伺服器以此驗證),不用平滑中的相機高度
-  network.sendShoot([state.x, PLAYER.eyeHeight[state.pose], state.z], [dir.x, dir.y, dir.z])
+  // 起點用姿勢對應的標準眼高(伺服器以此驗證),方向指向游標點到的位置
+  const origin = new THREE.Vector3(state.x, PLAYER.eyeHeight[state.pose], state.z)
+  const dir = hoverHit.point.clone().sub(origin)
+  if (dir.lengthSq() < 1e-6) return
+  dir.normalize()
+  network.sendShoot([origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z])
   recoil = 1
 }
 
@@ -245,13 +305,14 @@ const tick = () => {
     network.sendState([state.x, 0, state.z], state.yaw, state.pitch, state.pose)
   }
 
+  updateHover()
   fireTimer -= dt
-  if (firing && controls.locked.value && fireTimer <= 0) {
+  if (firing && hoverHit && fireTimer <= 0) {
     fireTimer = FIRE_INTERVAL
     shoot()
   }
   recoil = Math.max(0, recoil - dt * 8)
-  gun.position.z = -0.5 + recoil * 0.08
+  gun.position.z = -0.55 + recoil * 0.08
   gun.rotation.x = recoil * 0.12
 
   remotes.update(dt)
@@ -259,15 +320,43 @@ const tick = () => {
   renderer.render(scene, camera)
 }
 
-const onMouseDown = (event) => {
-  if (event.button === 0 && controls.locked.value) firing = true
+const syncPointer = (event) => {
+  if (controls.locked.value) return
+  const rect = renderer.domElement.getBoundingClientRect()
+  cursor.value = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  pointer.set((cursor.value.x / rect.width) * 2 - 1, -(cursor.value.y / rect.height) * 2 + 1)
+  pointerInside = true
+}
+const onMouseMove = (event) => {
+  if (event.target === renderer.domElement) syncPointer(event)
+  else pointerInside = false // 游標在 HUD 或聊天面板上
+}
+const onCanvasDown = (event) => {
+  if (event.button !== 0) return
+  event.preventDefault() // 拖曳時不選取文字
+  syncPointer(event)
+  updateHover()
+  if (hoverHit) firing = true // 指著人:開槍(按住連射)
+  else if (!controls.locked.value) controls.requestLock() // 點空白處:鎖定滑鼠進入視角操控
 }
 const onMouseUp = (event) => {
   if (event.button === 0) firing = false
 }
+// 離開視窗或切走時,清掉滑鼠狀態,避免卡在連射或停留在舊位置
+const resetPointer = () => {
+  firing = false
+  pointerInside = false
+}
 
+// 瀏覽器規定 Esc 一定會解除滑鼠鎖定,無法攔截;所以在聊天面板沒開時隱藏游標,並讓任何移動鍵立刻重新鎖定
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
+const onKeyRelock = (event) => {
+  if (controls.locked.value || chatBox.value?.isOpen) return
+  if (event.target instanceof HTMLElement && event.target.tagName === 'INPUT') return
+  if (MOVE_KEYS.has(event.code)) controls.requestLock()
+}
 const onChatSend = (text) => network.sendChat(text)
-const onChatClose = () => controls.requestLock()
+const onChatClose = () => controls.requestLock() // 關閉聊天後回到準心
 
 onMounted(() => {
   scene = new THREE.Scene()
@@ -285,6 +374,10 @@ onMounted(() => {
 
   buildRoom()
   buildFurniture()
+  staticMeshes = []
+  scene.traverse((o) => {
+    if (o.isMesh && o.userData.paintable === true) staticMeshes.push(o)
+  })
   buildViewmodel()
 
   remotes = createRemotePlayers(scene)
@@ -296,13 +389,13 @@ onMounted(() => {
 
   controls = usePlayerControls(renderer.domElement)
   if (import.meta.dev) window.__office = { controls, remotes }
-  const stop = watch(controls.locked, (value) => (locked.value = value))
-  disposables.push({ dispose: stop })
-  renderer.domElement.addEventListener('click', () => {
-    if (!chatBox.value?.isOpen) controls.requestLock() // 聊天面板開著時不鎖滑鼠,須先 Esc 關閉
-  })
-  window.addEventListener('mousedown', onMouseDown)
+  disposables.push({ dispose: watch(controls.locked, (value) => (locked.value = value)) })
+  renderer.domElement.addEventListener('mousedown', onCanvasDown)
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('keydown', onKeyRelock)
   window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('blur', resetPointer)
+  document.addEventListener('mouseleave', resetPointer)
 
   store.resetOffice()
   network = useNetwork({
@@ -340,11 +433,19 @@ onMounted(() => {
     },
     paint: (msg) => {
       // 自己被打中時沒有可附著的身體,只顯示畫面閃光,不在世界座標留斑點
-      if (msg.targetId !== store.myId) paint.addSplat(msg)
-      if (msg.origin) paint.addTracer(msg.origin, msg.pos, msg.color)
-      if (msg.targetId && msg.targetId === store.myId) {
-        hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color) }
+      // 漆彈真的飛過去,抵達後才留下斑點(自己的彈從槍口出發)
+      let origin = msg.origin
+      if (msg.from === store.myId) {
+        camera.updateMatrixWorld(true)
+        origin = gun.localToWorld(new THREE.Vector3(0, 0.02, -0.4)).toArray()
       }
+      const onHit = () => {
+        if (disposed) return
+        if (msg.targetId !== store.myId) paint.addSplat(msg)
+        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color) }
+      }
+      if (origin) paint.addProjectile(origin, msg.pos, msg.color, onHit)
+      else onHit()
     },
     correct: (pos) => {
       controls.state.x = pos[0]
@@ -364,8 +465,12 @@ onBeforeUnmount(() => {
   disposed = true
   cancelAnimationFrame(animationFrame)
   resizeObserver?.disconnect()
-  window.removeEventListener('mousedown', onMouseDown)
+  renderer?.domElement.removeEventListener('mousedown', onCanvasDown)
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('keydown', onKeyRelock)
   window.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('blur', resetPointer)
+  document.removeEventListener('mouseleave', resetPointer)
   network?.disconnect()
   controls?.dispose()
   remotes?.dispose()
@@ -380,12 +485,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative h-screen w-screen overflow-hidden bg-black">
-    <div ref="host" class="absolute inset-0"></div>
+    <div ref="host" class="absolute inset-0" :class="!locked && !chatBox?.isOpen ? 'cursor-none' : hovering ? 'cursor-pointer' : ''"></div>
 
-    <div v-if="locked" class="pointer-events-none absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2">
-      <div class="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/90"></div>
-      <div class="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/90"></div>
-    </div>
+    <div v-if="locked && !hovering" class="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"></div>
+    <!-- 準心或游標指到別的玩家時,在游標位置顯示瞄準圈 -->
+    <div
+      v-show="hovering"
+      class="pointer-events-none absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-red-500 shadow-[0_0_0_2px_rgba(255,255,255,0.8)]"
+      :style="{ left: cursor.x + 'px', top: cursor.y + 'px' }"
+    ></div>
 
     <div
       :key="hitFlash.key"
@@ -396,7 +504,7 @@ onBeforeUnmount(() => {
 
     <!-- 左上:場景名稱 -->
     <div class="pointer-events-none absolute left-4 top-4 rounded-2xl bg-white/90 px-5 py-3 text-lg font-bold text-neutral-800 shadow">
-      OfficeRoom <span class="mx-1 text-neutral-300">|</span> 3D 辦公室
+      叁角辦公室
     </div>
 
     <!-- 上方中央:連線狀態與目前姿勢 -->
@@ -428,24 +536,18 @@ onBeforeUnmount(() => {
       :my-id="store.myId"
       @send="onChatSend"
       @close="onChatClose"
-    />
+        />
 
     <!-- 下方:操作提示 -->
     <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 text-xs text-neutral-700">
       <p class="pointer-events-none rounded-full bg-white/90 px-4 py-2 shadow">
-        🎯 左鍵開槍(按住連射) · WASD 移動 · C 蹲 · Z 趴 · Enter 聊天 · Esc 收起來
+        🎯 準心對準同事並點擊開槍(按住連射) · 點畫面鎖定滑鼠 · WASD 移動 · C 蹲 · Z 趴 · Enter 開啟聊天並使用滑鼠
       </p>
-      <button class="rounded-full bg-white/90 px-4 py-2 font-bold shadow hover:bg-white" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
-        動作與聊天
+      <button class="rounded-full bg-yellow-400 px-5 py-2 text-sm font-bold text-black shadow-lg ring-2 ring-white hover:bg-yellow-300" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
+        ⏎ Enter 聊天
       </button>
     </div>
 
-    <div
-      v-if="!locked && !chatBox?.isOpen"
-      class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30"
-    >
-      <p class="rounded bg-black/60 px-4 py-2 text-white">點擊畫面開始操控</p>
-    </div>
   </div>
 </template>
 
