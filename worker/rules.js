@@ -117,7 +117,25 @@ const hostnameOf = (host) => {
   }
 }
 
-export function isOriginAllowed(origin, requestHost) {
+// 逗號分隔字串 -> 陣列(trim、去空字串);未設定時回 []
+export function parseAllowedOrigins(str) {
+  if (typeof str !== 'string') return []
+  return str
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+const originOf = (s) => {
+  try {
+    const o = new URL(s).origin
+    return o === 'null' ? null : o
+  } catch {
+    return null
+  }
+}
+
+export function isOriginAllowed(origin, requestHost, allowedOrigins = []) {
   const requestLocal = LOCAL_HOSTNAMES.includes(hostnameOf(requestHost))
   if (origin === null || origin === undefined || origin === '') return requestLocal
   let u
@@ -127,5 +145,6 @@ export function isOriginAllowed(origin, requestHost) {
     return false
   }
   if (u.host === requestHost) return true
+  if (u.origin !== 'null' && allowedOrigins.some((a) => originOf(a) === u.origin)) return true
   return requestLocal && LOCAL_HOSTNAMES.includes(u.hostname)
 }

@@ -1,5 +1,5 @@
 import { Room } from './Room.js'
-import { isOriginAllowed } from './rules.js'
+import { isOriginAllowed, parseAllowedOrigins } from './rules.js'
 
 export { Room }
 
@@ -10,13 +10,21 @@ export default {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected WebSocket', { status: 426 })
       }
-      if (!isOriginAllowed(request.headers.get('Origin'), url.host)) {
+      const allowed = parseAllowedOrigins(env.ALLOWED_ORIGINS)
+      if (!isOriginAllowed(request.headers.get('Origin'), url.host, allowed)) {
         return new Response('Forbidden', { status: 403 })
       }
       // 固定單一房間
       const stub = env.ROOM.get(env.ROOM.idFromName('main'))
       return stub.fetch(request)
     }
-    return env.ASSETS.fetch(request)
+    // 靜態資源由 Vercel 提供;這裡只做健康檢查
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, HEAD' } })
+    }
+    return new Response('office-paintball ok', {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
   },
 }

@@ -92,7 +92,8 @@ export default defineNuxtConfig({
     APP_URL: process.env.APP_URL,
     APP_API: process.env.APP_API,
     public: {
-      // 開發時指向 wrangler dev,例如 ws://localhost:8787/ws;正式環境留空,使用同源 /ws
+      // 遊戲伺服器位址。開發:ws://localhost:8787/ws;正式(Vercel 環境變數):wss://<worker>.workers.dev/ws
+      // 此值在建置時就寫進輸出檔,改了要重新建置
       WS_URL: process.env.WS_URL || '',
       APP_TITLE: process.env.APP_TITLE,
       APP_KEYWORDS: process.env.APP_KEYWORDS,
@@ -107,6 +108,10 @@ export default defineNuxtConfig({
   devtools: { enabled: process.env.NODE_ENV === 'development' },
   future: {
     compatibilityVersion: 3,
+  },
+  // 明確使用 static preset:Vercel 上也輸出到 .output/public,與 vercel.json 一致
+  nitro: {
+    preset: 'static',
   },
   compatibilityDate: '2025-07-17',
 })

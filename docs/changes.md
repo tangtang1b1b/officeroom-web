@@ -103,3 +103,10 @@
 - 修改摘要：`WS_URL` 只在開發時生效(避免把 localhost 打包進正式站)；重連或伺服器重啟後清除舊的遠端玩家並移除快照中缺席者；自己被打中不再留懸空斑點；火柴人只釋放自己的 geometry；聊天框失焦自動關閉；「房間已滿」改為每 5 秒自動重試；伺服器新增每 IP 與未 join 連線上限(超過回 429)、5 秒 join 逾時、60 秒閒置斷線、較寬鬆的射擊起點驗證、正式環境不放行 localhost Origin、聊天超頻提示；`npm run worker:deploy` 先執行 `generate`。
 - 驗證結果：Vitest 57 通過；`npm run generate` 成功，輸出不含 `localhost:8787`；以腳本對本機 Worker 連兩個連線，確認 welcome、player_join、聊天、射擊廣播與快照正常。
 - 未解決事項：趴姿時視點在腳底、模型卻往前平躺約 1.75 公尺(視角與命中箱不一致)；尚未部署，需使用者先 `wrangler login`；尚未 commit。
+
+## 2026-11-11：改為 Vercel 前端 + Cloudflare Worker，並部署 Worker
+
+- 修改摘要：前端部署到 Vercel(`vercel.json`、`nitro.preset: 'static'`)，遊戲伺服器獨立部署到 Cloudflare Worker；`WS_URL` 正式環境生效；Worker 新增 `ALLOWED_ORIGINS`(完整 origin 清單)，移除靜態資源，`/` 回健康檢查文字。
+- 部署結果：Worker 網址 `https://office-paintball.streetcare.workers.dev`(帳號 workers.dev 子網域改為 `streetcare`)，`ALLOWED_ORIGINS=https://streetcare-kohl.vercel.app`。
+- 驗證結果：Vitest 59 通過；線上 `GET /` 回 200；以 `ws` 客戶端實測：該 Vercel Origin 可連線並收到 welcome，其他 Origin 與無 Origin 皆回 403。
+- 未解決事項：Vercel 專案環境變數 `WS_URL=wss://office-paintball.streetcare.workers.dev/ws` 尚待設定，設定後需重新部署前端；前端在 Vercel 的實際建置與跨網域連線尚未驗證；預覽網址不在允許清單內。

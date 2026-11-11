@@ -9,7 +9,7 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "worker:dev": "wrangler dev",
-    "worker:deploy": "npm run generate && wrangler deploy",
+    "worker:deploy": "wrangler deploy",
     "test": "vitest run"
   },
   "dependencies": {

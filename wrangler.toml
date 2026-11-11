@@ -2,11 +2,9 @@ name = "office-paintball"
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
-[assets]
-directory = ".output/public"
-binding = "ASSETS"
-# /ws 等請求先進 Worker,由 Worker 決定是否交給靜態資源
-run_worker_first = true
+[vars]
+# 部署前填入 Vercel 正式網址,逗號分隔,例如 "https://xxx.vercel.app"
+ALLOWED_ORIGINS = "https://streetcare-kohl.vercel.app"
 
 [[durable_objects.bindings]]
 name = "ROOM"

@@ -16,8 +16,9 @@ export const useNetwork = (handlers = {}) => {
   let roomFull = false
 
   const url = () => {
-    // WS_URL 在建置時就固定,只在開發時使用,避免把本機位址打包進正式站
-    if (import.meta.dev && config.public.WS_URL) return config.public.WS_URL
+    // WS_URL 在建置時固定(Vercel 的環境變數),指向 Cloudflare Worker 的 wss://…/ws。
+    // 前端與 Worker 不同網域,正式環境必須設定;未設定時退回同源 /ws。
+    if (config.public.WS_URL) return config.public.WS_URL
     return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
   }
 

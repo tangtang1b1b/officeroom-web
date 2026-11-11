@@ -8,6 +8,7 @@ import {
   isShootOriginValid,
   spawnYaw,
   isOriginAllowed,
+  parseAllowedOrigins,
   STATE_MAX_PER_SEC,
   MESSAGE_MAX_PER_SEC,
   CHAT_MAX_PER_WINDOW,
@@ -168,6 +169,39 @@ describe('spawn yaw and origin check', () => {
     expect(isOriginAllowed('http://127.0.0.1:3000', '[::1]:8787')).toBe(true)
     expect(isOriginAllowed('https://evil.com', 'localhost:8787')).toBe(false)
     expect(isOriginAllowed('null', 'x.com')).toBe(false)
+  })
+  it('origin allowlist', () => {
+    const list = ['https://my-app.vercel.app']
+    const host = 'w.workers.dev'
+    expect(isOriginAllowed('https://my-app.vercel.app', host, list)).toBe(true)
+    expect(isOriginAllowed('https://evil.vercel.app', host, list)).toBe(false)
+    expect(isOriginAllowed('https://x.my-app.vercel.app', host, list)).toBe(false)
+    expect(isOriginAllowed('http://my-app.vercel.app', host, list)).toBe(false)
+    expect(isOriginAllowed('https://my-app.vercel.app:8443', host, list)).toBe(false)
+    expect(isOriginAllowed(null, host, list)).toBe(false)
+    expect(isOriginAllowed('null', host, list)).toBe(false)
+    // 清單項目含路徑或尾斜線,仍以 origin 比對
+    expect(isOriginAllowed('https://my-app.vercel.app', host, ['https://my-app.vercel.app/'])).toBe(true)
+    expect(isOriginAllowed('https://my-app.vercel.app', host, ['https://my-app.vercel.app/a/b'])).toBe(true)
+    // 請求端 Origin 含路徑
+    expect(isOriginAllowed('https://my-app.vercel.app/path/', host, list)).toBe(true)
+    // 清單空 / 未提供時與先前一致
+    expect(isOriginAllowed('https://my-app.vercel.app', host, [])).toBe(false)
+    expect(isOriginAllowed('https://my-app.vercel.app', host)).toBe(false)
+    expect(isOriginAllowed('https://w.workers.dev', host, [])).toBe(true)
+    expect(isOriginAllowed('http://localhost:3000', 'localhost:8787', [])).toBe(true)
+    // 清單中的無效項目不影響
+    expect(isOriginAllowed('https://a.com', host, ['garbage', 'https://a.com'])).toBe(true)
+  })
+  it('parseAllowedOrigins', () => {
+    expect(parseAllowedOrigins(undefined)).toEqual([])
+    expect(parseAllowedOrigins('')).toEqual([])
+    expect(parseAllowedOrigins(' , ,')).toEqual([])
+    expect(parseAllowedOrigins('https://a.com')).toEqual(['https://a.com'])
+    expect(parseAllowedOrigins(' https://a.com , https://b.com,, ')).toEqual([
+      'https://a.com',
+      'https://b.com',
+    ])
   })
 })
 

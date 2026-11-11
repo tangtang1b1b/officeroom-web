@@ -78,4 +78,16 @@ GOOGLE_SITE_VERIFICATION=
 
 測試:`npm test`。格局資料在 `shared/layout.js`。
 
+## 部署
+
+前端與遊戲伺服器分開部署(Vercel 不支援 WebSocket 伺服器):
+
+1. **遊戲伺服器(Cloudflare Worker)**
+   - `wrangler.toml` 的 `ALLOWED_ORIGINS` 填入 Vercel 正式網址(完整 origin,逗號分隔,例如 `https://xxx.vercel.app`)。
+   - `npx wrangler login`(一次),再 `npm run worker:deploy`,取得 `https://<name>.<account>.workers.dev`(目前:`https://office-paintball.streetcare.workers.dev`)。
+2. **前端(Vercel)**
+   - 在 Vercel 專案環境變數新增 `WS_URL=wss://<name>.<account>.workers.dev/ws`(建置時寫入輸出檔,改了要重新部署)。
+   - Vercel 依 `vercel.json` 執行 `npm run generate`,輸出 `.output/public`。push 後自動部署。
+3. 換網域或新增預覽網址時,要同步更新 Worker 的 `ALLOWED_ORIGINS` 並重新 `worker:deploy`。
+
 # riding-think
