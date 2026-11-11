@@ -1,5 +1,6 @@
 // 辦公室格局資料(前端渲染、碰撞與伺服器射線檢測共用,純資料不依賴任何框架)
-// 座標:x 向右、y 向上、z 向前,單位公尺。暫時版格局,日後依實際照片與尺寸調整。
+// 座標:x 向右、y 向上、z 向前(角色與相機 yaw=0 時朝 -z),單位公尺。
+// 暫時版格局,日後依實際照片與尺寸調整。
 
 export const ROOM = {
   minX: -7,
@@ -11,14 +12,17 @@ export const ROOM = {
 
 export const PLAYER = {
   radius: 0.3,
-  // 各姿勢的身體高度與眼睛高度
-  bodyHeight: { stand: 1.7, crouch: 1.1, prone: 0.5 },
-  eyeHeight: { stand: 1.6, crouch: 1.0, prone: 0.4 },
+  // 各姿勢的身體高度與眼睛高度(須與 utils/office/stickman.js 的模型一致)
+  bodyHeight: { stand: 1.75, crouch: 1.3, prone: 0.3 },
+  eyeHeight: { stand: 1.6, crouch: 1.15, prone: 0.4 },
   walkSpeed: { stand: 3.2, crouch: 1.6, prone: 0.8 },
+  // 趴下時身體從腳底沿面向(-z 旋轉 yaw)平躺的長度
+  proneLength: 1.75,
 }
 
 const DESK = { w: 1.6, d: 0.75, h: 0.75 }
 const CHAIR = { w: 0.55, d: 0.55, h: 0.9 }
+const CHAIR_COLLIDER_HEIGHT = 1.25 // 含椅背與頭枕
 
 // 桌組:每組兩張桌子背對背,椅子在兩側
 const CLUSTER_CENTERS = [
@@ -39,25 +43,60 @@ CLUSTER_CENTERS.forEach((center, index) => {
       id: `desk-${index}-${side}`,
       x: center.x,
       z: center.z + side * (DESK.d / 2 + 0.02),
+      side,
       ...DESK,
     })
     CHAIRS.push({
       id: `chair-${index}-${side}`,
       x: center.x,
       z: center.z + side * (DESK.d + 0.55),
+      side,
       ...CHAIR,
     })
   })
 })
 
-const toBox = (item) => ({
-  id: item.id,
-  min: [item.x - item.w / 2, 0, item.z - item.d / 2],
-  max: [item.x + item.w / 2, item.h, item.z + item.d / 2],
+// 紙箱(搬家感)
+export const CRATES = [
+  { id: 'crate-0', x: -6.2, z: -4.2, w: 0.7, d: 0.5, h: 0.45 },
+  { id: 'crate-1', x: -5.4, z: -4.4, w: 0.6, d: 0.5, h: 0.4 },
+]
+
+// 桌面上的隔板與螢幕:尺寸與位置(相對桌子中心)同時供渲染與碰撞使用
+export const PARTITION = { w: 1.6, h: 0.3, d: 0.02 }
+export const MONITOR = { w: 0.55, h: 0.32, d: 0.03, y: 0.3, zOffset: 0.1 }
+
+export const partitionOf = (desk) => ({
+  x: desk.x,
+  z: desk.z + (desk.side > 0 ? -desk.d / 2 + 0.01 : desk.d / 2 - 0.01),
+  ...PARTITION,
+})
+export const monitorOf = (desk) => ({
+  x: desk.x,
+  z: desk.z + (desk.side > 0 ? -MONITOR.zOffset : MONITOR.zOffset),
+  ...MONITOR,
 })
 
-// 所有實心碰撞方塊(桌、椅);牆以 ROOM 邊界處理
-export const COLLIDERS = [...DESKS, ...CHAIRS].map(toBox)
+const box = (id, x, z, w, d, minY, maxY) => ({
+  id,
+  min: [x - w / 2, minY, z - d / 2],
+  max: [x + w / 2, maxY, z + d / 2],
+})
+
+// 所有實心碰撞方塊;牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
+export const COLLIDERS = [
+  ...DESKS.flatMap((desk) => {
+    const part = partitionOf(desk)
+    const mon = monitorOf(desk)
+    return [
+      box(desk.id, desk.x, desk.z, desk.w, desk.d, 0, desk.h),
+      box(`${desk.id}-partition`, part.x, part.z, part.w, part.d, desk.h, desk.h + part.h),
+      box(`${desk.id}-monitor`, mon.x, mon.z, mon.w, mon.d, desk.h + mon.y - mon.h / 2, desk.h + mon.y + mon.h / 2),
+    ]
+  }),
+  ...CHAIRS.map((chair) => box(chair.id, chair.x, chair.z, chair.w, chair.d, 0, CHAIR_COLLIDER_HEIGHT)),
+  ...CRATES.map((crate) => box(crate.id, crate.x, crate.z, crate.w, crate.d, 0, crate.h)),
+]
 
 export const SPAWN_POINTS = [
   { x: -6, z: 0 },

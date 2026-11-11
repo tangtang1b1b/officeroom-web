@@ -1,27 +1,50 @@
 <script setup>
 import * as THREE from 'three'
-import { createStickman } from '~/utils/office/stickman.js'
-import { ROOM, PLAYER, DESKS, CHAIRS } from '~/shared/layout.js'
+import { createRemotePlayers } from '~/utils/office/remotePlayers.js'
+import { createPaint } from '~/utils/office/paint.js'
+import { useAllStore } from '~/store/all.js'
+import { ROOM, PLAYER, DESKS, CHAIRS, CRATES, PARTITION, MONITOR, partitionOf, monitorOf } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
 })
 
+const store = useAllStore()
 const host = ref(null)
+const chatBox = ref(null)
 const locked = ref(false)
 const poseLabel = ref('站立')
+const hitFlash = ref({ key: 0, color: '#ffffff' })
 const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下' }
+const STATUS_TEXT = {
+  connecting: '連線中…',
+  reconnecting: '連線中斷,重新連線中…',
+  full: '辦公室已滿(最多 10 人),會自動重試…',
+  failed: '無法連線到伺服器,請重新整理頁面',
+}
+const statusText = computed(() => STATUS_TEXT[store.netStatus] || '')
+const colorCss = (color) => (typeof color === 'number' ? `#${color.toString(16).padStart(6, '0')}` : color)
+
+const SEND_INTERVAL = 0.05
+const FIRE_INTERVAL = 0.18
 
 let renderer
 let scene
 let camera
 let controls
+let network
+let remotes
+let paint
+let gun
+let recoil = 0
+let sendTimer = 0
+let fireTimer = 0
+let firing = false
 let animationFrame
 let resizeObserver
 let clock
 let disposed = false
 let eyeHeight = PLAYER.eyeHeight.stand
-const stickmen = []
 const disposables = []
 
 const COLOR = {
@@ -108,10 +131,11 @@ const buildFurniture = () => {
     for (const sx of [-1, 1]) {
       addBox(group, [0.05, desk.h - 0.04, desk.d - 0.1], [sx * (desk.w / 2 - 0.08), (desk.h - 0.04) / 2, 0], COLOR.yellow)
     }
-    // 黃色隔板放在兩張背對背桌子中間側
-    addBox(group, [desk.w, 0.3, 0.02], [0, desk.h + 0.15, desk.z > 0 ? -desk.d / 2 + 0.01 : desk.d / 2 - 0.01], COLOR.yellow)
-    // 螢幕
-    addBox(group, [0.55, 0.32, 0.03], [0, desk.h + 0.3, desk.z > 0 ? -0.1 : 0.1], 0x111111)
+    // 黃色隔板與螢幕:位置由 layout 計算,與碰撞資料一致
+    const part = partitionOf(desk)
+    addBox(group, [PARTITION.w, PARTITION.h, PARTITION.d], [0, desk.h + PARTITION.h / 2, part.z - desk.z], COLOR.yellow)
+    const mon = monitorOf(desk)
+    addBox(group, [MONITOR.w, MONITOR.h, MONITOR.d], [0, desk.h + MONITOR.y, mon.z - desk.z], 0x111111)
     scene.add(group)
   }
   for (const chair of CHAIRS) {
@@ -126,30 +150,12 @@ const buildFurniture = () => {
     scene.add(group)
   }
   // 紙箱(搬家感)
-  addBox(scene, [0.7, 0.45, 0.5], [-6.2, 0.225, -4.2], COLOR.box)
-  addBox(scene, [0.6, 0.4, 0.5], [-5.4, 0.2, -4.4], COLOR.box)
-}
-
-const buildDummies = () => {
-  // 階段 1 的展示用火柴人,之後換成連線進來的玩家
-  const dummies = [
-    { x: 0, z: 0, color: 0xe74c3c, pose: 'stand' },
-    { x: 1.6, z: 0, color: 0x2ecc71, pose: 'crouch' },
-    { x: -1.6, z: 0, color: 0x9b59b6, pose: 'prone' },
-  ]
-  for (const item of dummies) {
-    const man = createStickman(item.color)
-    man.group.position.set(item.x, 0, item.z)
-    man.group.rotation.y = Math.PI
-    man.setPose(item.pose)
-    scene.add(man.group)
-    stickmen.push(man)
-  }
+  for (const crate of CRATES) addBox(scene, [crate.w, crate.h, crate.d], [crate.x, crate.h / 2, crate.z], COLOR.box)
 }
 
 const buildViewmodel = () => {
   // 第一人稱手上的漆彈槍
-  const gun = new THREE.Group()
+  gun = new THREE.Group()
   addBox(gun, [0.06, 0.08, 0.38], [0, 0, -0.1], 0x2b2b2b)
   addBox(gun, [0.04, 0.04, 0.14], [0, 0.02, -0.34], 0xf2b705)
   addBox(gun, [0.05, 0.12, 0.05], [0, -0.09, 0.02], 0x2b2b2b)
@@ -167,6 +173,15 @@ const resize = () => {
   camera.updateProjectionMatrix()
 }
 
+const shoot = () => {
+  const { state } = controls
+  const dir = new THREE.Vector3()
+  camera.getWorldDirection(dir)
+  // 起點用姿勢對應的標準眼高(伺服器以此驗證),不用平滑中的相機高度
+  network.sendShoot([state.x, PLAYER.eyeHeight[state.pose], state.z], [dir.x, dir.y, dir.z])
+  recoil = 1
+}
+
 const tick = () => {
   if (disposed) return
   animationFrame = requestAnimationFrame(tick)
@@ -179,9 +194,35 @@ const tick = () => {
   camera.rotation.set(state.pitch, state.yaw, 0, 'YXZ')
   poseLabel.value = POSE_LABELS[state.pose]
 
-  for (const man of stickmen) man.update(dt, 0)
+  sendTimer += dt
+  if (sendTimer >= SEND_INTERVAL) {
+    sendTimer = 0
+    network.sendState([state.x, 0, state.z], state.yaw, state.pitch, state.pose)
+  }
+
+  fireTimer -= dt
+  if (firing && controls.locked.value && fireTimer <= 0) {
+    fireTimer = FIRE_INTERVAL
+    shoot()
+  }
+  recoil = Math.max(0, recoil - dt * 8)
+  gun.position.z = -0.5 + recoil * 0.08
+  gun.rotation.x = recoil * 0.12
+
+  remotes.update(dt)
+  paint.update(dt)
   renderer.render(scene, camera)
 }
+
+const onMouseDown = (event) => {
+  if (event.button === 0 && controls.locked.value) firing = true
+}
+const onMouseUp = (event) => {
+  if (event.button === 0) firing = false
+}
+
+const onChatSend = (text) => network.sendChat(text)
+const onChatClose = () => controls.requestLock()
 
 onMounted(() => {
   scene = new THREE.Scene()
@@ -199,14 +240,66 @@ onMounted(() => {
 
   buildRoom()
   buildFurniture()
-  buildDummies()
   buildViewmodel()
 
+  remotes = createRemotePlayers(scene)
+  paint = createPaint(scene, (id) => remotes.getGroup(id))
+
   controls = usePlayerControls(renderer.domElement)
-  if (import.meta.dev) window.__office = { controls }
+  if (import.meta.dev) window.__office = { controls, remotes }
   const stop = watch(controls.locked, (value) => (locked.value = value))
   disposables.push({ dispose: stop })
   renderer.domElement.addEventListener('click', controls.requestLock)
+  window.addEventListener('mousedown', onMouseDown)
+  window.addEventListener('mouseup', onMouseUp)
+
+  store.resetOffice()
+  network = useNetwork({
+    welcome: (msg) => {
+      // 採用伺服器指定的出生點與朝向
+      if (msg.you?.pos) {
+        controls.state.x = msg.you.pos[0]
+        controls.state.z = msg.you.pos[2]
+        controls.state.yaw = msg.you.yaw ?? controls.state.yaw
+      }
+      // 重連或伺服器重啟後 id 可能重新編號,先清掉舊的遠端玩家再重建
+      remotes.dispose()
+      for (const player of msg.players || []) {
+        if (player.id !== store.myId && player.pos) remotes.applyState(player)
+      }
+    },
+    playerJoin: (player) => {
+      if (player.id === store.myId || !player.pos) return
+      remotes.remove(player.id) // 同 id 的舊資料(名字、顏色)不能沿用
+      remotes.applyState(player)
+    },
+    playerLeave: (id) => remotes.remove(id),
+    snapshot: (players) => {
+      const present = new Set()
+      for (const player of players) {
+        if (player.id === store.myId || !player.pos) continue
+        present.add(player.id)
+        remotes.applyState(player)
+      }
+      // 快照中已不存在的玩家(例如斷線期間離開)移除
+      for (const id of remotes.ids()) {
+        if (!present.has(id)) remotes.remove(id)
+      }
+    },
+    paint: (msg) => {
+      // 自己被打中時沒有可附著的身體,只顯示畫面閃光,不在世界座標留斑點
+      if (msg.targetId !== store.myId) paint.addSplat(msg)
+      if (msg.origin) paint.addTracer(msg.origin, msg.pos, msg.color)
+      if (msg.targetId && msg.targetId === store.myId) {
+        hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color) }
+      }
+    },
+    correct: (pos) => {
+      controls.state.x = pos[0]
+      controls.state.z = pos[2]
+    },
+  })
+  network.connect(props.nickname)
 
   resize()
   resizeObserver = new ResizeObserver(resize)
@@ -219,10 +312,16 @@ onBeforeUnmount(() => {
   disposed = true
   cancelAnimationFrame(animationFrame)
   resizeObserver?.disconnect()
+  window.removeEventListener('mousedown', onMouseDown)
+  window.removeEventListener('mouseup', onMouseUp)
+  network?.disconnect()
   controls?.dispose()
-  stickmen.forEach((man) => man.dispose())
+  remotes?.dispose()
+  paint?.dispose()
   disposables.forEach((item) => item.dispose())
+  if (import.meta.dev) delete window.__office
   renderer?.dispose()
+  renderer?.forceContextLoss()
   renderer?.domElement.remove()
 })
 </script>
@@ -236,13 +335,57 @@ onBeforeUnmount(() => {
       <div class="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/90"></div>
     </div>
 
+    <div
+      :key="hitFlash.key"
+      class="hit-flash pointer-events-none absolute inset-0"
+      :style="{ '--hit-color': hitFlash.color }"
+      v-show="hitFlash.key > 0"
+    ></div>
+
     <div class="pointer-events-none absolute left-4 top-4 rounded bg-black/50 px-3 py-2 text-sm text-white">
       <p>{{ nickname }}・{{ poseLabel }}</p>
-      <p class="mt-1 text-xs text-white/70">WASD 移動 ・ 滑鼠視角 ・ C 蹲 ・ Z 趴 ・ Esc 釋放滑鼠</p>
+      <p class="mt-1 text-xs text-white/70">
+        WASD 移動 ・ 滑鼠視角 ・ 左鍵射擊 ・ C 蹲 ・ Z 趴 ・ Enter 聊天 ・ Esc 釋放滑鼠
+      </p>
     </div>
 
-    <div v-if="!locked" class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
+    <div class="pointer-events-none absolute right-4 top-4 min-w-32 rounded bg-black/50 px-3 py-2 text-sm text-white">
+      <p class="mb-1 text-xs text-white/70">線上 {{ store.roster.length }} / 10</p>
+      <p v-for="player in store.roster" :key="player.id" class="flex items-center gap-2">
+        <span class="inline-block h-2.5 w-2.5 rounded-full" :style="{ background: colorCss(player.color) }"></span>
+        {{ player.name }}<span v-if="player.id === store.myId" class="text-white/50">(你)</span>
+      </p>
+    </div>
+
+    <p
+      v-if="statusText"
+      class="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded bg-red-600/80 px-3 py-1 text-sm text-white"
+    >
+      {{ statusText }}
+    </p>
+
+    <OfficeChatBox ref="chatBox" :messages="store.chat" @send="onChatSend" @close="onChatClose" />
+
+    <div
+      v-if="!locked && !chatBox?.isOpen"
+      class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30"
+    >
       <p class="rounded bg-black/60 px-4 py-2 text-white">點擊畫面開始操控</p>
     </div>
   </div>
 </template>
+
+<style scoped>
+.hit-flash {
+  background: radial-gradient(circle, transparent 40%, var(--hit-color) 130%);
+  animation: hit-fade 0.6s ease-out forwards;
+}
+@keyframes hit-fade {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}
+</style>

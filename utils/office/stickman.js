@@ -13,13 +13,18 @@ const SHIN = 0.45
 const TORSO = 0.6
 const LIMB_RADIUS = 0.04
 
-const limb = (length, radius, material) => {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 8), material)
-  mesh.position.y = -length / 2
-  return mesh
-}
-
 export const createStickman = (color = 0x2d9cdb) => {
+  // 只釋放自己建立的 geometry:身上可能附著共用的斑點與名牌,不能用 traverse 全部釋放
+  const geometries = []
+  const track = (geometry) => {
+    geometries.push(geometry)
+    return geometry
+  }
+  const limb = (length, radius, material) => {
+    const mesh = new THREE.Mesh(track(new THREE.CylinderGeometry(radius, radius, length, 8)), material)
+    mesh.position.y = -length / 2
+    return mesh
+  }
   const material = new THREE.MeshLambertMaterial({ color })
   const darkMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 })
   const root = new THREE.Group()
@@ -47,10 +52,10 @@ export const createStickman = (color = 0x2d9cdb) => {
   // 軀幹、頭與手臂
   const torso = new THREE.Group()
   hip.add(torso)
-  const torsoMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, TORSO, 8), material)
+  const torsoMesh = new THREE.Mesh(track(new THREE.CylinderGeometry(0.05, 0.05, TORSO, 8)), material)
   torsoMesh.position.y = TORSO / 2
   torso.add(torsoMesh)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), material)
+  const head = new THREE.Mesh(track(new THREE.SphereGeometry(0.13, 16, 12)), material)
   head.position.y = TORSO + 0.13
   torso.add(head)
 
@@ -67,7 +72,7 @@ export const createStickman = (color = 0x2d9cdb) => {
   // 漆彈槍接在右手末端,沿手臂方向向前
   const gun = new THREE.Group()
   gun.position.y = -0.55
-  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.07), darkMaterial)
+  const gunBody = new THREE.Mesh(track(new THREE.BoxGeometry(0.07, 0.3, 0.07)), darkMaterial)
   gunBody.position.y = -0.1
   gun.add(gunBody)
   armR.add(gun)
@@ -117,9 +122,7 @@ export const createStickman = (color = 0x2d9cdb) => {
       apply(swing)
     },
     dispose() {
-      root.traverse((object) => {
-        if (object.geometry) object.geometry.dispose()
-      })
+      geometries.forEach((geometry) => geometry.dispose())
       material.dispose()
       darkMaterial.dispose()
     },

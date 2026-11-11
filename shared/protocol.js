@@ -19,7 +19,22 @@ export const S2C = {
   SNAPSHOT: 'snapshot',
   CHAT: 'chat',
   PAINT: 'paint',
+  CORRECT: 'correct',
+  ERROR: 'error',
 }
+
+// 最終伺服器訊息格式(pos 皆為 [x,y,z]):
+// welcome     { type, id, you:{pos,yaw}, players:[Player] }
+// player_join { type, player:Player }
+// player_leave{ type, id }
+// snapshot    { type, players:[Player] }
+// chat        { type, from:name, text }
+// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId? }
+// correct     { type, pos:[x,y,z] }
+// error       { type, error }
+// Player = { id, name, color, pos, yaw, pitch, pose }
+
+export const MAX_PITCH = 1.5
 
 const isFiniteNum = (n) => typeof n === 'number' && Number.isFinite(n)
 const isVec3 = (v) => Array.isArray(v) && v.length === 3 && v.every(isFiniteNum)
@@ -27,8 +42,20 @@ const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 const COORD_LIMIT = 1000
 
+// 控制字元、雙向控制字元與零寬字元
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g
+
 export function sanitizeName(name) {
-  return String(name).replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  return String(name).replace(UNSAFE_CHARS, '').trim()
+}
+
+// 正規化到 [-π, π]
+export function normalizeAngle(a) {
+  const twoPi = Math.PI * 2
+  let r = a % twoPi
+  if (r > Math.PI) r -= twoPi
+  else if (r < -Math.PI) r += twoPi
+  return r
 }
 
 // 回傳 { ok: true, msg } 或 { ok: false, error }。msg 為只含白名單欄位的新物件。
@@ -47,12 +74,18 @@ export function validateClientMessage(data) {
       if (!POSES.includes(data.pose)) return fail('bad pose')
       return {
         ok: true,
-        msg: { type: C2S.STATE, pos: [...data.pos], yaw: data.yaw, pitch: data.pitch, pose: data.pose },
+        msg: {
+          type: C2S.STATE,
+          pos: [...data.pos],
+          yaw: normalizeAngle(data.yaw),
+          pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, data.pitch)),
+          pose: data.pose,
+        },
       }
     }
     case C2S.CHAT: {
       if (typeof data.text !== 'string') return fail('bad text')
-      const text = data.text.replace(/[\u0000-\u001f\u007f]/g, '').trim()
+      const text = sanitizeName(data.text)
       if (text.length === 0 || text.length > MAX_CHAT_LENGTH) return fail('bad text')
       return { ok: true, msg: { type: C2S.CHAT, text } }
     }

@@ -67,6 +67,15 @@ GOOGLE_SITE_VERIFICATION=
 
 ## 虛擬辦公室
 
-建置中:3D 火柴人辦公室,多人連線、聊天室與漆彈槍互動。
+3D 火柴人辦公室:多人連線、聊天室與漆彈槍互動(10 人以內)。
+
+本機開發需開兩個終端機:
+
+1. `npm run worker:dev`(Cloudflare Worker,預設 `ws://localhost:8787/ws`)
+2. `npm run dev`(前端,`.env` 需設定 `WS_URL=ws://localhost:8787/ws`)
+
+操作:WASD 移動、滑鼠視角、左鍵射擊、C 蹲、Z 趴、Enter 聊天、Esc 釋放滑鼠。
+
+測試:`npm test`。格局資料在 `shared/layout.js`。
 
 # riding-think

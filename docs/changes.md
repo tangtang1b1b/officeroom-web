@@ -86,6 +86,20 @@
 ## 2026-11-11：改為多人 3D 火柴人辦公室(階段 1 與協定/Worker)
 
 - 需求：放棄機車遊戲，改做 10 人以內同事連線的 3D 虛擬辦公室，含火柴人、蹲趴、聊天室與漆彈槍。
-- 修改摘要：移除機車遊戲程式、素材與規格；新增 `shared/layout.js`(格局與碰撞資料)、`utils/office/stickman.js`、`composables/usePlayerControls.js`、`components/office/OfficeScene.client.vue`、暱稱入口 `pages/index.vue`；新增 `shared/protocol.js`、`shared/raycast.js`、`worker/index.js`、`worker/Room.js`、`wrangler.toml` 與 Vitest 測試。
+- 修改摘要：移除機車遊戲程式、素材與規格；新增 `shared/layout.js`(格局與碰撞資料)、`utils/office/stickman.js`、`composables/usePlayerControls.js`、`components/office/OfficeScene.vue`、暱稱入口 `pages/index.vue`；新增 `shared/protocol.js`、`shared/raycast.js`、`worker/index.js`、`worker/Room.js`、`wrangler.toml` 與 Vitest 測試。
 - 驗證結果：dev server 於 Browser pane 確認場景渲染、站/蹲/趴火柴人、窗戶與桌椅，console 無錯誤；api-dev 回報 Vitest 25 通過。
 - 未解決事項：前端尚未連線 Worker、聊天室與漆彈槍 UI 未做；尚未部署；格局為暫時版，待使用者補照片與尺寸；伺服器端未做桌椅碰撞檢查。
+
+## 2026-11-11：階段 2 到 4 前端連線、聊天與漆彈槍，並修正審查問題
+
+- 需求：修正 reviewer 找出的問題，並把前端接上 Worker，完成多人同步、聊天室與漆彈槍。
+- 修改摘要：伺服器改為 token bucket 限速、狀態與訊息限頻、連線數與逾時上限、Origin 檢查、趴姿平躺命中形狀、射擊起點驗證、`correct` 位置校正；碰撞資料補上隔板、螢幕、椅背與紙箱；前端新增 `composables/useNetwork.js`、`utils/office/remotePlayers.js`、`utils/office/paint.js`、`components/office/ChatBox.vue`，`store/all.js` 增加連線狀態、名單與聊天；`nuxt.config.js` 改為 `ssr: false`，`OfficeScene` 移除 `.client` 後綴(否則 `ssr:false` 下 `onMounted` 取不到 DOM)。
+- 驗證結果：Vitest 52 個通過；以 `wrangler dev` 加 `nuxt dev` 開兩個分頁實測：名單同步、伺服器出生點、移動不被誤判、射擊命中對方並顯示命中閃光、牆面斑點、聊天互通均正常，console 無錯誤。
+- 驗證限制：瀏覽器分頁僅約 2 FPS，未實測流暢度；未實測 3 人以上、趴姿命中與斷線重連在真實網路下的表現；尚未部署。
+- 未解決事項：格局仍是暫時版；尚未執行 `wrangler login` 與 `wrangler deploy`；`npm run generate` 靜態輸出路徑與 `wrangler.toml` 的 assets 尚未實際串接驗證。
+
+## 2026-11-11：第二輪審查修正
+
+- 修改摘要：`WS_URL` 只在開發時生效(避免把 localhost 打包進正式站)；重連或伺服器重啟後清除舊的遠端玩家並移除快照中缺席者；自己被打中不再留懸空斑點；火柴人只釋放自己的 geometry；聊天框失焦自動關閉；「房間已滿」改為每 5 秒自動重試；伺服器新增每 IP 與未 join 連線上限(超過回 429)、5 秒 join 逾時、60 秒閒置斷線、較寬鬆的射擊起點驗證、正式環境不放行 localhost Origin、聊天超頻提示；`npm run worker:deploy` 先執行 `generate`。
+- 驗證結果：Vitest 57 通過；`npm run generate` 成功，輸出不含 `localhost:8787`；以腳本對本機 Worker 連兩個連線，確認 welcome、player_join、聊天、射擊廣播與快照正常。
+- 未解決事項：趴姿時視點在腳底、模型卻往前平躺約 1.75 公尺(視角與命中箱不一致)；尚未部署，需使用者先 `wrangler login`；尚未 commit。

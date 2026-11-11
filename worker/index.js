@@ -1,4 +1,5 @@
 import { Room } from './Room.js'
+import { isOriginAllowed } from './rules.js'
 
 export { Room }
 
@@ -8,6 +9,9 @@ export default {
     if (url.pathname === '/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected WebSocket', { status: 426 })
+      }
+      if (!isOriginAllowed(request.headers.get('Origin'), url.host)) {
+        return new Response('Forbidden', { status: 403 })
       }
       // 固定單一房間
       const stub = env.ROOM.get(env.ROOM.idFromName('main'))

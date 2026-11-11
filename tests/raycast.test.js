@@ -27,6 +27,13 @@ describe('raycastBoxes', () => {
     expect(raycastBoxes([0, 0.5, -4.5], [0, 0, -1], COLLIDERS, 20)).toBeNull()
   })
 
+  it('origin inside box returns distance 0 hit', () => {
+    const box = { min: [0, 0, 0], max: [2, 2, 2] }
+    const hit = raycastBoxes([1, 1, 1], [0, 0, 1], [box], 10)
+    expect(hit.distance).toBe(0)
+    expect(hit.point).toEqual([1, 1, 1])
+    expect(hit.normal).toEqual([0, 0, -1])
+  })
   it('handles axis-parallel ray outside slab', () => {
     const box = { min: [0, 0, 0], max: [1, 1, 1] }
     expect(raycastBoxes([5, 0.5, -1], [0, 0, 1], [box], 10)).toBeNull()
@@ -63,8 +70,39 @@ describe('raycastPlayer', () => {
   })
   it('hits head cap from above', () => {
     const hit = raycastPlayer([2, 5, 3], [0, -1, 0], [2, 0, 3], 'stand', 50)
-    close(hit.distance, 5 - 1.7)
+    close(hit.distance, 5 - 1.75)
     expect(hit.normal).toEqual([0, 1, 0])
+  })
+  it('prone player lies along facing (yaw=0 toward -z)', () => {
+    // 腳底在 (2,0,3),身體延伸到 z=1.25
+    const hit = raycastPlayer([2, 0.15, 0], [0, 0, 1], [2, 0, 3], 'prone', 50, 0)
+    close(hit.distance, 1.25)
+    expect(hit.normal).toEqual([0, 0, -1])
+    // 腳底後方(+z)沒有身體
+    expect(raycastPlayer([2, 0.15, 6], [0, 0, -1], [2, 0, 3], 'prone', 50, 0).distance).toBeCloseTo(3)
+    expect(raycastPlayer([2, 0.15, 0], [0, 0, 1], [2, 0, 3], 'prone', 1, 0)).toBeNull()
+  })
+  it('prone player rotated by yaw', () => {
+    // yaw=π/2: 方向 (-1,0,0),身體延伸到 x=1.25 (腳在 x=3)
+    const hit = raycastPlayer([0, 0.15, 3], [1, 0, 0], [3, 0, 3], 'prone', 50, Math.PI / 2)
+    close(hit.distance, 3 - 1.75)
+    close(hit.normal[0], -1)
+    // 從腳後方(x>3)打來,先碰到腳底端面
+    close(raycastPlayer([6, 0.15, 3.0], [-1, 0, 0], [3, 0, 3], 'prone', 50, Math.PI / 2).distance, 3)
+    expect(raycastPlayer([0, 0.15, 3.5], [1, 0, 0], [3, 0, 3], 'prone', 50, Math.PI / 2)).toBeNull()
+  })
+  it('prone player is hit from above only below 0.3m', () => {
+    const hit = raycastPlayer([2, 2, 2.5], [0, -1, 0], [2, 0, 3], 'prone', 50, 0)
+    close(hit.distance, 1.7)
+    expect(hit.normal[1]).toBe(1)
+  })
+  it('raycastWorld passes yaw for prone', () => {
+    const hit = raycastWorld([2, 0.15, 0], [0, 0, 1], { players: [{ id: 'b', pos: [2, 0, 3], pose: 'prone', yaw: 0 }] })
+    expect(hit.kind).toBe('player')
+    const miss = raycastWorld([2, 0.15, 0], [0, 0, 1], { players: [{ id: 'b', pos: [2, 0, 3], pose: 'prone', yaw: Math.PI }] })
+    // yaw=π: 身體向 +z 延伸(z 3~4.75),從 z=0 先碰到腳底端面
+    expect(miss.kind).toBe('player')
+    close(miss.distance, 3)
   })
   it('misses when off to the side', () => {
     expect(raycastPlayer([2.5, 1.6, 0], [0, 0, 1], [2, 0, 3], 'stand', 50)).toBeNull()

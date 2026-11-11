@@ -3,7 +3,8 @@ import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
 import path from 'path'
 
 export default defineNuxtConfig({
-  ssr: true,
+  // 遊戲全在瀏覽器端,以 nuxt generate 靜態輸出後部署到 Cloudflare
+  ssr: false,
 
   app: {
     baseURL: '/',
@@ -90,8 +91,9 @@ export default defineNuxtConfig({
     APP_DESC: process.env.APP_DESC,
     APP_URL: process.env.APP_URL,
     APP_API: process.env.APP_API,
-    API_TOKEN: process.env.API_TOKEN,
     public: {
+      // 開發時指向 wrangler dev,例如 ws://localhost:8787/ws;正式環境留空,使用同源 /ws
+      WS_URL: process.env.WS_URL || '',
       APP_TITLE: process.env.APP_TITLE,
       APP_KEYWORDS: process.env.APP_KEYWORDS,
       APP_DESC: process.env.APP_DESC,

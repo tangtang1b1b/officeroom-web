@@ -1,4 +1,5 @@
-import { ROOM, PLAYER, COLLIDERS, SPAWN_POINTS } from '~/shared/layout.js'
+import { PLAYER, SPAWN_POINTS } from '~/shared/layout.js'
+import { isBlocked } from '~/shared/collision.js'
 
 const MOUSE_SENSITIVITY = 0.0022
 const MAX_PITCH = 1.45
@@ -6,21 +7,6 @@ const MAX_PITCH = 1.45
 const isTyping = (target) =>
   target instanceof HTMLElement &&
   (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-
-// 圓形(玩家)與 AABB(俯視 xz)是否重疊
-const circleHitsBox = (x, z, radius, box) => {
-  const nearestX = Math.max(box.min[0], Math.min(x, box.max[0]))
-  const nearestZ = Math.max(box.min[2], Math.min(z, box.max[2]))
-  const dx = x - nearestX
-  const dz = z - nearestZ
-  return dx * dx + dz * dz < radius * radius
-}
-
-export const isBlocked = (x, z, radius = PLAYER.radius) => {
-  if (x - radius < ROOM.minX || x + radius > ROOM.maxX) return true
-  if (z - radius < ROOM.minZ || z + radius > ROOM.maxZ) return true
-  return COLLIDERS.some((box) => circleHitsBox(x, z, radius, box))
-}
 
 // 第一人稱操控:Pointer Lock 視角 + WASD 移動 + C 蹲 / Z 趴(再按一次起身)
 export const usePlayerControls = (element) => {
@@ -92,7 +78,14 @@ export const usePlayerControls = (element) => {
   return {
     state,
     locked,
-    requestLock: () => element.requestPointerLock?.(),
+    // Esc 後立刻再鎖定會被瀏覽器拒絕,忽略即可,使用者點擊畫面會再鎖定
+    requestLock: () => {
+      try {
+        element.requestPointerLock?.()?.catch?.(() => {})
+      } catch {
+        // 忽略
+      }
+    },
     update,
     dispose() {
       window.removeEventListener('keydown', onKeyDown)
