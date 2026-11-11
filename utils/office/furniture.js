@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { PARTITION, MONITOR, partitionOf, monitorOf } from '../../shared/layout.js'
+import { PARTITION, MONITOR, partitionLocalZ, monitorLocalZ } from '../../shared/layout.js'
 
 // 辦公室家具建模(純 Three.js,低多邊形方塊/圓柱組合,不載入外部模型)。
 // 幾何與材質由 kit 快取共用並統一釋放:用 createFurnitureKit() 建立,不用時呼叫 kit.dispose()。
@@ -42,6 +42,12 @@ export const createFurnitureKit = ({ paintable = false } = {}) => {
     box(parent, [w, h, d], position, color, opts = {}) {
       const geometry = cached(geometries, `b${w},${h},${d}`, () => new THREE.BoxGeometry(w, h, d))
       return place(new THREE.Mesh(geometry, mat(color, opts.extra)), parent, position, opts)
+    },
+    sphere(parent, [r, wSeg = 12, hSeg = 10], position, color, opts = {}) {
+      const geometry = cached(geometries, `s${r},${wSeg},${hSeg}`, () => new THREE.SphereGeometry(r, wSeg, hSeg))
+      const mesh = place(new THREE.Mesh(geometry, mat(color, opts.extra)), parent, position, opts)
+      if (opts.scaleY) mesh.scale.y = opts.scaleY
+      return mesh
     },
     cyl(parent, [rTop, rBottom, h, seg = 10], position, color, opts = {}) {
       const geometry = cached(geometries, `c${rTop},${rBottom},${h},${seg}`, () => new THREE.CylinderGeometry(rTop, rBottom, h, seg))
@@ -130,7 +136,7 @@ export const buildDesk = (group, desk, k) => {
   k.box(group, [w - 0.16, 0.3, 0.02], [0, h - 0.04 - 0.17, inner * (d / 2 - 0.1)], FURNITURE_COLOR.yellow)
   // 抽屜櫃:靠其中一側,三層抽屜與把手
   const pedW = 0.4
-  const pedD = d - 0.16
+  const pedD = d - 0.22 // 後緣內縮,不與背擋板共面(曾造成黃色點狀閃爍)
   const pedH = h - 0.08
   const pedX = (side > 0 ? 1 : -1) * (w / 2 - 0.08 - pedW / 2)
   const pedZ = outer * 0.01
@@ -143,10 +149,8 @@ export const buildDesk = (group, desk, k) => {
   }
 
   // 黃色隔板與螢幕:位置由 layout 計算,與碰撞資料一致
-  const part = partitionOf(desk)
-  k.box(group, [PARTITION.w, PARTITION.h, PARTITION.d], [0, h + PARTITION.h / 2, part.z - desk.z], FURNITURE_COLOR.yellow)
-  const mon = monitorOf(desk)
-  const monZ = mon.z - desk.z
+  k.box(group, [PARTITION.w, PARTITION.h, PARTITION.d], [0, h + PARTITION.h / 2, partitionLocalZ(desk)], FURNITURE_COLOR.yellow)
+  const monZ = monitorLocalZ(desk)
   const monY = h + MONITOR.y
   k.box(group, [MONITOR.w, MONITOR.h, MONITOR.d], [0, monY, monZ], 0x111111)
   k.box(group, [MONITOR.w - 0.04, MONITOR.h - 0.04, 0.004], [0, monY, monZ + outer * (MONITOR.d / 2 + 0.002)], 0x1b3550, {
@@ -226,13 +230,13 @@ const buildShelf = (g, f, k) => {
   const t = 0.03
   const body = 0xe8e4da
   const front = -1
-  k.box(g, [w, h, 0.02], [0, h / 2, -front * (d / 2 - 0.01)], 0xd2cdbf) // 背板
+  // 穿透式:不裝背板,從另一側看得到格子對面
   for (const sx of [-1, 1]) k.box(g, [t, h, d], [sx * (w / 2 - t / 2), h / 2, 0], body)
   // 中間直板
   const bays = Math.max(1, Math.round(w / 0.8))
   const bayW = (w - 2 * t) / bays
   for (let i = 1; i < bays; i++) k.box(g, [t, h - t, d - 0.02], [-w / 2 + t + bayW * i, h / 2, 0], body)
-  const rows = Math.max(2, Math.round(h / 0.38))
+  const rows = Math.max(2, Math.round(h / 0.6)) // 矮櫃 2 格、高櫃 3 格
   const rowH = (h - t) / rows
   k.box(g, [w, t, d], [0, h - t / 2, 0], body) // 頂板
   k.box(g, [w, 0.04, d], [0, 0.02, 0], 0xcfc9ba) // 底座
@@ -264,9 +268,9 @@ const buildLocker = (g, f, k) => {
   const { w, d, h } = f
   const front = 1
   const lip = 0.03
-  const bodyColor = 0x8a9096
+  const bodyColor = f.color ?? 0x8a9096
   k.box(g, [w, h - 0.04, d - lip], [0, (h - 0.04) / 2, -front * lip / 2], bodyColor) // 頂面留給桌板,避免共面閃爍
-  k.box(g, [w, 0.04, d - lip], [0, h - 0.02, -front * lip / 2], 0xb9bec3) // 桌板
+  k.box(g, [w, 0.04, d - lip], [0, h - 0.02, -front * lip / 2], f.top ?? 0xb9bec3) // 桌板
   k.box(g, [w - 0.04, 0.05, d - lip - 0.02], [0, 0.025, -front * lip / 2], 0x5a5f65) // 踢腳
   const faceZ = front * (d / 2 - lip + 0.0075)
   const cols = Math.max(1, Math.round(w / 0.5))
@@ -278,18 +282,57 @@ const buildLocker = (g, f, k) => {
     for (let r = 0; r < rowsN; r++) {
       const x = -w / 2 + colW * (c + 0.5)
       const y = 0.05 + rowH * (r + 0.5)
-      k.box(g, [colW - 0.03, rowH - 0.03, 0.015], [x, y, faceZ], 0xa3a9af)
+      k.box(g, [colW - 0.03, rowH - 0.03, 0.015], [x, y, faceZ], f.face ?? 0xa3a9af)
       k.box(g, [0.14, 0.018, 0.015], [x, y + rowH / 2 - 0.07, front * (d / 2 - 0.0075)], FURNITURE_COLOR.steelDark)
     }
   }
 }
 
-const FIXTURE_BUILDERS = { table: buildTable, sofa: buildSofa, shelf: buildShelf, locker: buildLocker }
+// 懶人沙發:壓扁的橢球本體加頂部坐墊
+const buildBeanbag = (g, f, k) => {
+  const { w, h, color } = f
+  const body = k.sphere(g, [w / 2, 16, 12], [0, h * 0.42, 0], color ?? 0xe8743c, { scaleY: (h * 0.84) / w })
+  k.sphere(g, [w * 0.3, 14, 10], [0, h * 0.82, 0], color ?? 0xe8743c, { scaleY: 0.35 })
+  return body
+}
+
+// 單人懶人沙發(參考實物照):厚坐墊 + 微後仰的靠背 + 鈕扣。局部座標面向 -z、靠背在 +z。
+const buildLoungeChair = (g, f, k) => {
+  const { w, d, color } = f
+  const dark = new THREE.Color(color).multiplyScalar(0.8).getHex()
+  k.box(g, [w * 0.96, 0.12, d * 0.92], [0, 0.06, 0.02], dark) // 底座
+  k.box(g, [w, 0.24, d * 0.78], [0, 0.24, -d * 0.1], color) // 坐墊
+  k.box(g, [w, 0.6, 0.28], [0, 0.52, d / 2 - 0.2], color, { rotX: 0.22 }) // 靠背
+  for (const sx of [-1, 1]) {
+    k.box(g, [0.05, 0.015, 0.05], [sx * w * 0.22, 0.366, -d * 0.1], dark) // 坐墊鈕扣
+    k.box(g, [0.05, 0.05, 0.015], [sx * w * 0.22, 0.58, d / 2 - 0.33], dark) // 靠背鈕扣
+  }
+}
+
+// 圓桌:圓形桌面加中柱與圓底座
+const buildRoundTable = (g, f, k) => {
+  const { w, h } = f
+  k.cyl(g, [w / 2, w / 2, 0.05, 24], [0, h - 0.025, 0], FURNITURE_COLOR.oak)
+  k.cyl(g, [0.06, 0.06, h - 0.05, 10], [0, (h - 0.05) / 2, 0], FURNITURE_COLOR.steel)
+  k.cyl(g, [0.3, 0.3, 0.03, 16], [0, 0.015, 0], FURNITURE_COLOR.steelDark)
+}
+
+// 一般椅子(會客室用):椅背在 +z、yaw=0 面向 -z
+const buildPlainChair = (g, f, k) => {
+  const { w } = f
+  const half = w / 2
+  k.box(g, [w, 0.04, w], [0, 0.45, 0], FURNITURE_COLOR.oakDark)
+  k.box(g, [w, 0.42, 0.04], [0, 0.69, half - 0.02], FURNITURE_COLOR.oakDark)
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(g, [0.04, 0.43, 0.04], [sx * (half - 0.03), 0.215, sz * (half - 0.03)], FURNITURE_COLOR.steel)
+}
+
+const FIXTURE_BUILDERS = { roundtable: buildRoundTable, chair: buildPlainChair, table: buildTable, sofa: buildSofa, shelf: buildShelf, locker: buildLocker, beanbag: buildBeanbag, loungechair: buildLoungeChair }
 
 // 固定家具(layout.js 的 FIXTURES):在 parent 下建立一個放在 (f.x, 0, f.z) 的 group 並回傳
 export const buildFixture = (parent, f, k) => {
   const group = new THREE.Group()
   group.position.set(f.x, 0, f.z)
+  group.rotation.y = f.yaw || 0
   const build = FIXTURE_BUILDERS[f.kind] ?? buildTable
   build(group, f, k)
   parent.add(group)

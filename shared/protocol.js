@@ -1,6 +1,6 @@
 // 前後端共用的訊息協定(JSON)。pos 為腳底位置 [x,y,z](y=0 為地面)。
 
-export const MAX_PLAYERS = 10
+export const MAX_PLAYERS = 7
 export const MAX_NAME_LENGTH = 16
 export const MAX_CHAT_LENGTH = 200
 export const POSES = ['stand', 'crouch', 'prone']

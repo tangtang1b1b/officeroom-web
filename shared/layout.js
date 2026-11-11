@@ -2,16 +2,22 @@
 // 座標:x 向右、y 向上、z 向前(角色與相機 yaw=0 時朝 -z),單位公尺。
 // 依使用者手繪草圖概估(尺寸為估計值,日後依實際尺寸微調)。草圖為直式梯形,
 // 這裡轉 90° 使長邊沿 x、桌子方向與桌子模型一致,並以外接矩形近似斜牆。
-// 區域:x<5.2 且 z>3.4 為會議室(x<0.4)與會客室(0.4<x<5.2);其餘為開放辦公區。
-// 房間 20×15,桌組間通道約 1.5m、桌組與牆至少 1.2m。
+// 房間為梯形:x -10~10,+z 牆在 7.5,-z 牆斜(窄端 -x、寬端 +x)。草圖轉 90°:草圖上方 = -x、草圖左側 = +z。
+// z>3.4 的一帶是隔間:會議室(x<0.4)、會客室(0.4<x<5.2)、入口區(x>5.2,玻璃門在 +x 牆);
+// z<3.4 是開放辦公區:Will/Yuhua 靠 -x 牆面向其他人,四組背對背桌組,中間一排矮書櫃。
+
 
 export const ROOM = {
   minX: -10,
-  maxX: 10,
-  minZ: -7.5,
+  maxX: 5.5, // 長度 15.5m:會議室壓縮後,會客室與入口(大小不變)整塊往會議室方向移
+  minZ: -8.2, // 外接框;-z 側牆是斜的,實際界線見 WALL_SLANT / minZAt
   maxZ: 7.5,
   height: 3,
 }
+
+// 梯形平面:-z 側的牆從窄端 (-10, -5.1) 斜到寬端 (5.5, -8.2)(草圖由窄變寬,與手繪梯形一致)
+export const WALL_SLANT = { x0: -10, z0: -5.1, x1: 5.5, z1: -8.2 }
+export const minZAt = (x) => WALL_SLANT.z0 + ((WALL_SLANT.z1 - WALL_SLANT.z0) * (x - WALL_SLANT.x0)) / (WALL_SLANT.x1 - WALL_SLANT.x0)
 
 export const PLAYER = {
   radius: 0.2, // 碰撞圓半徑(比肩寬小,過走道與門不易卡住)
@@ -99,28 +105,30 @@ const CHAIR = { w: 0.55, d: 0.55, h: 0.9 }
 const CHAIR_COLLIDER = { w: 0.5, d: 0.5 }
 const CHAIR_COLLIDER_HEIGHT = 1.15 // 含椅背與頭枕(轉椅總高約 1.12)
 
-// 桌組:每組兩張桌子背對背,椅子在兩側;位置對應草圖中黃色桌組由左上往右下排列
-const CLUSTER_CENTERS = [
-  { x: -7.75, z: -1.9 },
-  { x: -4.65, z: -2.5 },
-  { x: -1.55, z: -3.1 },
-  { x: 1.55, z: -3.7 },
-  { x: 4.65, z: -4.3 },
-  { x: 7.75, z: -4.9 },
-]
+// 桌子可旋轉 yaw(0 或 ±π/2):w、d 是桌子自己的長寬(局部座標),碰撞用 footprint 換算成世界方向。
+const rotated = (yaw) => Math.abs(Math.sin(yaw || 0)) > 0.5
+export const footprint = (obj, w, d) => (rotated(obj.yaw) ? { w: d, d: w } : { w, d })
+const localToWorld = (obj, lx, lz) => {
+  const c = Math.cos(obj.yaw || 0)
+  const s = Math.sin(obj.yaw || 0)
+  return { x: obj.x + lx * c + lz * s, z: obj.z - lx * s + lz * c }
+}
 
 export const DESKS = []
 export const CHAIRS = []
 
+// 4 張一組:兩排背對背桌子(椅子在 ±z 兩側),兩排沿 x 首尾相接 → 共兩組 8 張。
+// 每「排」是一個 cluster:組 A 為 cluster 0、1,組 B 為 cluster 2、3(組 B 略往後退)。
+const CLUSTER_CENTERS = [
+  { x: -5.2, z: -3.9 },
+  { x: -3.5, z: -3.9 },
+  { x: 0.6, z: -4.7 },
+  { x: 2.3, z: -4.7 },
+]
+export const clusterGroup = (id) => (/\d/.test(id) ? (Number(id.split('-')[1]) < 2 ? 'A' : 'B') : 'wall-row')
 CLUSTER_CENTERS.forEach((center, index) => {
   ;[-1, 1].forEach((side) => {
-    DESKS.push({
-      id: `desk-${index}-${side}`,
-      x: center.x,
-      z: center.z + side * (DESK.d / 2 + 0.02),
-      side,
-      ...DESK,
-    })
+    DESKS.push({ id: `desk-${index}-${side}`, x: center.x, z: center.z + side * (DESK.d / 2 + 0.02), side, yaw: 0, ...DESK })
     CHAIRS.push({
       id: `chair-${index}-${side}`,
       x: center.x,
@@ -132,10 +140,28 @@ CLUSTER_CENTERS.forEach((center, index) => {
   })
 })
 
-// 紙箱(搬家感)
-export const CRATES = [
-  { id: 'crate-0', x: 8.6, z: 5.8, w: 0.7, d: 0.5, h: 0.45 },
-  { id: 'crate-1', x: 7.8, z: 6.1, w: 0.6, d: 0.5, h: 0.4 },
+// Will、Yuhua:靠 -x 牆的兩張桌子,椅子在牆側、面向 +x(其他同事的方向)。
+// 桌子旋轉 π/2、side=-1:椅子在局部 -z = 世界 -x。
+;[
+  { name: 'will', z: -1.4 },
+  { name: 'yuhua', z: -3.2 },
+].forEach(({ name, z }) => {
+  DESKS.push({ id: `desk-${name}`, x: -8.3, z, side: -1, yaw: Math.PI / 2, ...DESK })
+  CHAIRS.push({ id: `chair-${name}`, x: -9.6, z, side: -1, yaw: -Math.PI / 2, ...CHAIR })
+})
+
+// 座位表:name 為 null 表示尚未指定員工(三個空位,不需要有人)。
+export const SEATS = [
+  { id: 'seat-will', name: 'Will', deskId: 'desk-will', chairId: 'chair-will' },
+  { id: 'seat-yuhua', name: 'Yuhua', deskId: 'desk-yuhua', chairId: 'chair-yuhua' },
+  { id: 'seat-1', name: null, deskId: 'desk-0-1', chairId: 'chair-0-1' },
+  { id: 'seat-2', name: null, deskId: 'desk-0--1', chairId: 'chair-0--1' },
+  { id: 'seat-3', name: 'Amin', deskId: 'desk-1-1', chairId: 'chair-1-1' },
+  { id: 'seat-4', name: 'Kai', deskId: 'desk-1--1', chairId: 'chair-1--1' },
+  { id: 'seat-5', name: null, deskId: 'desk-2-1', chairId: 'chair-2-1' },
+  { id: 'seat-6', name: 'Sean', deskId: 'desk-2--1', chairId: 'chair-2--1' },
+  { id: 'seat-7', name: 'Eric', deskId: 'desk-3-1', chairId: 'chair-3-1' },
+  { id: 'seat-8', name: 'Sandy', deskId: 'desk-3--1', chairId: 'chair-3--1' },
 ]
 
 const WALL_T = 0.2
@@ -143,40 +169,74 @@ const WALL_T = 0.2
 const wallX = (id, x0, x1, z) => ({ id, x: (x0 + x1) / 2, z, w: x1 - x0, d: WALL_T })
 const wallZ = (id, x, z0, z1) => ({ id, x, z: (z0 + z1) / 2, w: WALL_T, d: z1 - z0 })
 export const WALLS = [
-  wallX('wall-a', -10, -6, 3.4), // 會議室門在 x -6 ~ -4.8
-  wallX('wall-b', -4.8, 2.4, 3.4), // 會客室門在 x 2.4 ~ 3.6
-  wallX('wall-c', 3.6, 5.3, 3.4),
-  wallZ('wall-d', 0.4, 3.4, 7.5), // 會議室與會客室之間
-  wallZ('wall-e', 5.2, 3.4, 7.5), // 會客室底牆
+  wallX('wall-a', -10, -8.4, 3.4), // 會議室門在 x -8.4 ~ -7.2
+  wallX('wall-b', -7.2, -0.1, 3.4), // 會客室門在 x -0.1 ~ 1.1
+  wallX('wall-c', 1.1, 2.6, 3.4), // 止於 wall-e 的牆面,避免兩道牆重疊
+  wallZ('wall-d', -2.1, 3.4, 7.5), // 會議室與會客室之間
+  wallZ('wall-e', 2.7, 3.4, 7.5), // 會客室底牆
+  wallX('wall-f', -10, -8.3, 0.0), // 左上角的短牆:擋在 Will、Yuhua 座位與走廊之間,小櫃子靠在它的 +z 面
 ]
 
-// 固定家具(桌、櫃、沙發):{ id, kind, x, z, w, d, h },kind 決定外觀
+// 外牆的窗戶與門(只供渲染;窗戶在 +z 牆的會議室、會客室段,玻璃門在 +x 牆的入口區)
+export const WINDOWS = [
+  { wall: 'z', from: -8.6, to: -2.7 }, // 會議室
+  { wall: 'z', from: -1.5, to: 1.7 }, // 會客室
+]
+// -x 端牆(Will、Yuhua 後方)的窗戶:z 範圍、窗台與窗頂高度
+export const END_WINDOW = { z0: -4.3, z1: -0.6, sill: 1.1, head: 2.4 }
+export const ENTRANCE_DOOR = { wall: 'x', z: 5.4, w: 1.6, h: 2.3 }
+
+// 固定家具:{ id, kind, x, z, w, d, h, yaw? },kind 決定外觀。
+// 兩組桌子中間、書櫃另一側(靠隔牆)是三張懶人沙發排成扇形(整排寬度與書櫃相當);
+// 只有一個胸口高(約 1.25m)的矮書櫃。會客室只有一張圓桌和三張一般椅子。
+const LOUNGE = { w: 1.0, d: 1.0, h: 0.8 }
+const LOUNGE_CENTER = { x: -2.0, z: 2.95 } // 靠近書櫃(椅背朝書櫃),弧度放寬一些
+const fan = (angleDeg) => {
+  const a = (angleDeg * Math.PI) / 180
+  return {
+    x: LOUNGE_CENTER.x + Math.sin(a) * 2.2,
+    z: LOUNGE_CENTER.z - Math.cos(a) * 2.2,
+    yaw: Math.PI - a, // 面向圓心
+  }
+}
+const chairAround = (id, x, z, yaw) => ({ id, kind: 'chair', x, z, w: 0.45, d: 0.45, h: 0.9, yaw })
 export const FIXTURES = [
-  { id: 'meeting-table', kind: 'table', x: -3.2, z: 5.6, w: 3.4, d: 1.2, h: 0.75 },
-  { id: 'table-a', kind: 'table', x: -9.5, z: 0.6, w: 0.9, d: 1.0, h: 0.75 },
-  { id: 'table-b', kind: 'table', x: -9.5, z: 1.8, w: 0.9, d: 1.0, h: 0.75 },
-  { id: 'sofa', kind: 'sofa', x: 2.8, z: 7.05, w: 2.4, d: 0.8, h: 0.85 },
-  { id: 'coffee-table', kind: 'table', x: 2.8, z: 5.4, w: 1.2, d: 0.6, h: 0.45 },
-  // 草圖藍色長條:高書櫃(中間留 x -0.8 ~ 0.8 走道)與矮櫃
-  { id: 'shelf-a', kind: 'shelf', x: -2.2, z: 1.0, w: 2.8, d: 0.54, h: 1.9 },
-  { id: 'shelf-b', kind: 'shelf', x: 2.0, z: 1.0, w: 2.4, d: 0.54, h: 1.9 },
-  { id: 'locker-a', kind: 'locker', x: -2.45, z: 1.65, w: 3.1, d: 0.66, h: 0.9 },
-  { id: 'locker-b', kind: 'locker', x: 2.05, z: 1.65, w: 2.3, d: 0.66, h: 0.9 },
+  { id: 'meeting-table', kind: 'table', x: -5.5, z: 5.6, w: 3.4, d: 1.2, h: 0.75 },
+  { id: 'shelf-a', kind: 'shelf', x: -2.0, z: -0.3, w: 4.8, d: 0.45, h: 1.25 }, // 穿透式格子櫃
+  { id: 'round-table', kind: 'roundtable', x: 0.3, z: 5.6, w: 1.2, d: 1.2, h: 0.75 },
+  chairAround('reception-chair-w', -0.8, 5.6, -Math.PI / 2),
+  chairAround('reception-chair-e', 1.4, 5.6, Math.PI / 2),
+  chairAround('reception-chair-s', 0.3, 6.7, 0),
+  // 白色小櫃子(有門):背靠 -x 端牆、門朝 +x,在 wall-f 與會議室牆之間
+  { id: 'cupboard', kind: 'locker', x: -9.75, z: 2.0, w: 1.6, d: 0.5, h: 0.9, yaw: Math.PI / 2, color: 0xf0eee8, top: 0xffffff, face: 0xe6e3dc },
+  { id: 'lounge-0', kind: 'loungechair', ...fan(-40), ...LOUNGE, color: 0xc2623a },
+  { id: 'lounge-1', kind: 'loungechair', ...fan(0), ...LOUNGE, color: 0xb5532f },
+  { id: 'lounge-2', kind: 'loungechair', ...fan(40), ...LOUNGE, color: 0xd07a45 },
 ]
 
-// 桌面上的隔板與螢幕:尺寸與位置(相對桌子中心)同時供渲染與碰撞使用
+// 會議室面向開放區的隔牆是落地玻璃(x ≤ 0.4 的部分),門口缺口有玻璃門
+export const GLASS_WALL = { z: 3.4, x0: -7.2, x1: -2.1, door: { x0: -8.4, x1: -7.2 } }
+// 入口區:水泥色地板;正對玻璃門的牆(wall-e)是深色背牆,掛公司名稱
+export const ENTRANCE_ZONE = { x0: 2.7, x1: 5.5, z0: 3.4, z1: 7.5 }
+
+// 桌面上的隔板與螢幕:尺寸與位置(相對桌子中心,局部座標)同時供渲染與碰撞使用
 export const PARTITION = { w: 1.6, h: 0.3, d: 0.02 }
 export const MONITOR = { w: 0.55, h: 0.32, d: 0.03, y: 0.3, zOffset: 0.1 }
 
+// 局部 z(桌子 side>0 時椅子在 +z、隔板與螢幕在 -z 側)
+export const partitionLocalZ = (desk) => (desk.side > 0 ? -desk.d / 2 + 0.01 : desk.d / 2 - 0.01)
+export const monitorLocalZ = (desk) => (desk.side > 0 ? -MONITOR.zOffset : MONITOR.zOffset)
+
 export const partitionOf = (desk) => ({
-  x: desk.x,
-  z: desk.z + (desk.side > 0 ? -desk.d / 2 + 0.01 : desk.d / 2 - 0.01),
-  ...PARTITION,
+  ...localToWorld(desk, 0, partitionLocalZ(desk)),
+  ...footprint(desk, PARTITION.w, PARTITION.d),
+  h: PARTITION.h,
 })
 export const monitorOf = (desk) => ({
-  x: desk.x,
-  z: desk.z + (desk.side > 0 ? -MONITOR.zOffset : MONITOR.zOffset),
-  ...MONITOR,
+  ...localToWorld(desk, 0, monitorLocalZ(desk)),
+  ...footprint(desk, MONITOR.w, MONITOR.d),
+  h: MONITOR.h,
+  y: MONITOR.y,
 })
 
 const box = (id, x, z, w, d, minY, maxY) => ({
@@ -188,26 +248,29 @@ const box = (id, x, z, w, d, minY, maxY) => ({
 // 所有實心碰撞方塊;外牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
 export const COLLIDERS = [
   ...WALLS.map((w) => box(w.id, w.x, w.z, w.w, w.d, 0, ROOM.height)),
-  ...FIXTURES.map((f) => box(f.id, f.x, f.z, f.w, f.d, 0, f.h)),
+  ...FIXTURES.map((f) => {
+    const fp = footprint(f, f.w, f.d)
+    return box(f.id, f.x, f.z, fp.w, fp.d, 0, f.h)
+  }),
   ...DESKS.flatMap((desk) => {
+    const fp = footprint(desk, desk.w, desk.d)
     const part = partitionOf(desk)
     const mon = monitorOf(desk)
     return [
-      box(desk.id, desk.x, desk.z, desk.w, desk.d, 0, desk.h),
+      box(desk.id, desk.x, desk.z, fp.w, fp.d, 0, desk.h),
       box(`${desk.id}-partition`, part.x, part.z, part.w, part.d, desk.h, desk.h + part.h),
       box(`${desk.id}-monitor`, mon.x, mon.z, mon.w, mon.d, desk.h + mon.y - mon.h / 2, desk.h + mon.y + mon.h / 2),
     ]
   }),
-  // 椅子與紙箱:固定靜態方塊(椅子 yaw=0 面向 -z,side>0 → 0、side<0 → π)
+  // 椅子:固定靜態方塊
   ...CHAIRS.map((c) => box(c.id, c.x, c.z, CHAIR_COLLIDER.w, CHAIR_COLLIDER.d, 0, CHAIR_COLLIDER_HEIGHT)),
-  ...CRATES.map((c) => box(c.id, c.x, c.z, c.w, c.d, 0, c.h)),
 ]
 
 export const SPAWN_POINTS = [
-  { x: -8, z: 1.5 },
-  { x: -6.2, z: 1.8 },
-  { x: 4.2, z: 1.0 },
-  { x: 8.5, z: 0.5 },
-  { x: 8.5, z: 2.5 },
-  { x: 0, z: 2.6 },
+  { x: -8, z: 2.4 },
+  { x: -6, z: 1.9 },
+  { x: 4, z: 2.2 },
+  { x: 4.6, z: 0.5 },
+  { x: 4.6, z: 5.2 },
+  { x: 0.3, z: 4.2 },
 ]

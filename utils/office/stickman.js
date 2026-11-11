@@ -141,7 +141,7 @@ export const createStickman = (color = 0x2d9cdb, appearance) => {
     legR.thigh.rotation.x = current.thigh - swing
     legR.shin.rotation.x = -current.thigh
     neck.rotation.x = lookAngle * 0.8
-    armL.rotation.x = current.arm + lookAngle
+    armL.rotation.x = current.arm // 左手自然下垂,只有持槍的右手跟著視線上下
     armR.rotation.x = current.arm + lookAngle
     armL.rotation.z = 0.04
     armR.rotation.z = -0.04

@@ -25,7 +25,7 @@ import {
 import { isBlocked } from '../shared/collision.js'
 import { COLLIDERS, ROOM, PLAYER, SPAWN_POINTS } from '../shared/layout.js'
 
-const player = (pose = 'stand', pos = [-6, 0, 2.65], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
+const player = (pose = 'stand', pos = [-6, 0, -1.2], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
 
 describe('token bucket movement', () => {
   it('allows legitimate walking speed over time', () => {
@@ -33,14 +33,14 @@ describe('token bucket movement', () => {
     let t = 0
     for (let i = 0; i < 40; i++) {
       t += 50
-      const r = evaluateMove(p, [p.pos[0] + PLAYER.walkSpeed.stand * 0.05, 0, 2.65], t)
+      const r = evaluateMove(p, [p.pos[0] + PLAYER.walkSpeed.stand * 0.05, 0, -1.2], t)
       expect(r.ok).toBe(true)
       p.pos = r.pos
     }
   })
   it('rejects teleport beyond budget cap', () => {
     const p = player()
-    const r = evaluateMove(p, [-6 + MOVE_BUDGET_CAP + 0.5, 0, 2.65], 1000)
+    const r = evaluateMove(p, [-6 + MOVE_BUDGET_CAP + 0.5, 0, -1.2], 1000)
     expect(r).toEqual({ ok: false, reason: 'speed' })
   })
   it('does not allow sustained speeding via many small steps', () => {
@@ -49,7 +49,7 @@ describe('token bucket movement', () => {
     let rejected = 0
     for (let i = 0; i < 100; i++) {
       t += 50
-      const r = evaluateMove(p, [p.pos[0] + 0.3, 0, 2.65], t) // 6 m/s
+      const r = evaluateMove(p, [p.pos[0] + 0.3, 0, -1.2], t) // 6 m/s
       if (r.ok) p.pos = r.pos
       else rejected++
       if (p.pos[0] > 5) break
@@ -60,8 +60,8 @@ describe('token bucket movement', () => {
   })
   it('uses current pose speed (prone is slow)', () => {
     const p = player('prone')
-    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1, 0, 2.65], 1000).ok).toBe(true) // 用掉幾乎整個額度
-    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1 + 0.5, 0, 2.65], 1100).ok).toBe(false) // 只補回約 0.1
+    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1, 0, -1.2], 1000).ok).toBe(true) // 用掉幾乎整個額度
+    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1 + 0.5, 0, -1.2], 1100).ok).toBe(false) // 只補回約 0.1
   })
   it('rejected move does not consume budget', () => {
     const p = player()
@@ -209,11 +209,13 @@ describe('spawn yaw and origin check', () => {
 describe('collision.isBlocked', () => {
   it('blocks outside room and allows open floor', () => {
     expect(isBlocked(ROOM.maxX, 0)).toBe(true)
-    expect(isBlocked(ROOM.minX + PLAYER.radius, -5)).toBe(false)
+    expect(isBlocked(ROOM.minX + PLAYER.radius, -0.6)).toBe(false)
+    expect(isBlocked(5, -8.5)).toBe(true) // 斜牆外
+    expect(isBlocked(5, -6)).toBe(false) // 寬端仍有空間
     expect(isBlocked(-6, 2.65)).toBe(false)
   })
   it('blocks inside collider, free just outside radius', () => {
-    const b = COLLIDERS.find((c) => c.id === 'desk-5--1')
+    const b = COLLIDERS.find((c) => c.id === 'desk-3--1')
     const cx = (b.min[0] + b.max[0]) / 2
     const cz = (b.min[2] + b.max[2]) / 2
     expect(isBlocked(cx, cz)).toBe(true)
