@@ -84,18 +84,10 @@ export function evaluateMove(player, newPos, now) {
   return { ok: true, pos: [newPos[0], 0, newPos[2]], cost: dist }
 }
 
-// 退還額度(例如移動通過檢查後因推不動物件而被拒絕)。不超過上限。
-export function refundMove(bucket, amount) {
-  if (amount > 0) bucket.budget = Math.min(MOVE_BUDGET_CAP, bucket.budget + amount)
-  return bucket
-}
-
-// 選出生點:優先不與任何物件重疊的候選,離現有玩家最遠者;全部重疊時退回不考慮物件。
-// points: [{x,z}];playerPositions: [[x,y,z]];objects: [{x,z,radius}]
-export function pickSpawnPoint(points, playerPositions, objects = []) {
-  const free = points.filter((sp) =>
-    !objects.some((o) => Math.hypot(o.x - sp.x, o.z - sp.z) < PLAYER.radius + o.radius + 0.05),
-  )
+// 選出生點:優先不與固定碰撞方塊重疊的候選,離現有玩家最遠者;全部重疊時退回不考慮方塊。
+// points: [{x,z}];playerPositions: [[x,y,z]]
+export function pickSpawnPoint(points, playerPositions) {
+  const free = points.filter((sp) => !isBlocked(sp.x, sp.z, PLAYER.radius))
   const candidates = free.length > 0 ? free : points
   let best = candidates[0]
   let bestScore = -1

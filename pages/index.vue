@@ -10,7 +10,7 @@ const join = () => {
 </script>
 
 <template>
-  <OfficeScene v-if="joined" :nickname="nickname" />
+  <OfficeScene v-if="joined" :nickname="nickname" @logout="joined = false" />
   <div v-else class="flex min-h-screen items-center justify-center bg-neutral-100">
     <form class="flex w-72 flex-col gap-3 rounded bg-white p-6 shadow" @submit.prevent="join">
       <h1 class="text-lg font-bold">虛擬辦公室</h1>

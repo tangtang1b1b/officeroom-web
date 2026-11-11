@@ -4,7 +4,7 @@ import { useAllStore } from '~/store/all.js'
 const MAX_RETRIES = 10
 
 // 與 Worker 的 WebSocket 連線:自動重連、訊息分派。
-// handlers:welcome(msg) / playerJoin(player) / playerLeave(id) / snapshot(players, objects) / paint(msg) / correct(pos)
+// handlers:welcome(msg) / playerJoin(player) / playerLeave(id) / snapshot(players) / paint(msg) / correct(pos)
 export const useNetwork = (handlers = {}) => {
   const store = useAllStore()
   const config = useRuntimeConfig()
@@ -56,7 +56,7 @@ export const useNetwork = (handlers = {}) => {
         break
       }
       case S2C.SNAPSHOT:
-        handlers.snapshot?.(msg.players || [], msg.objects)
+        handlers.snapshot?.(msg.players || [])
         break
       case S2C.CHAT:
         store.pushChat(msg.from, msg.text)

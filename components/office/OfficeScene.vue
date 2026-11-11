@@ -2,13 +2,14 @@
 import * as THREE from 'three'
 import { createRemotePlayers } from '~/utils/office/remotePlayers.js'
 import { createPaint } from '~/utils/office/paint.js'
-import { createDynamicObjects } from '~/utils/office/dynamicObjects.js'
 import { useAllStore } from '~/store/all.js'
-import { ROOM, PLAYER, DESKS, DYNAMIC_DEFS, PARTITION, MONITOR, partitionOf, monitorOf } from '~/shared/layout.js'
+import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
+import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, CRATES } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
 })
+const emit = defineEmits(['logout'])
 
 const store = useAllStore()
 const host = ref(null)
@@ -36,7 +37,6 @@ let controls
 let network
 let remotes
 let paint
-let objects
 let gun
 let recoil = 0
 let sendTimer = 0
@@ -72,6 +72,7 @@ const addBox = (parent, size, position, color, extra = {}) => {
   const material = new THREE.MeshLambertMaterial({ color, ...extra })
   const mesh = new THREE.Mesh(geometry, material)
   mesh.position.set(...position)
+  mesh.userData.paintable = true
   parent.add(mesh)
   disposables.push(geometry, material)
   return mesh
@@ -93,14 +94,14 @@ const buildRoom = () => {
     addBox(scene, [0.5, 0.4, depth], [x, ROOM.height - 0.2, cz], COLOR.beam)
   }
   // 軌道燈
-  for (const z of [-2, 2]) {
+  for (const z of [-4, 0, 4]) {
     addBox(scene, [width - 1, 0.04, 0.04], [cx, ROOM.height - 0.45, z], 0xffffff, {
       emissive: 0xffffff,
       emissiveIntensity: 0.6,
     })
   }
   // 白色方管:沿 x 方向,貼天花板下方
-  for (const z of [-3.5, 3.5]) {
+  for (const z of [-5.5, 5.5]) {
     addBox(scene, [width - 1, 0.14, 0.14], [cx, ROOM.height - 0.1, z], COLOR.tube)
   }
 
@@ -142,41 +143,54 @@ const buildRoom = () => {
   // 紅磚立面:axis 'z' 表示位於 z=fixed(後牆外),'x' 表示位於 x=fixed(左牆外)
   const brickFacade = (axis, fixed, span) => {
     const isZ = axis === 'z'
-    addBox(scene, isZ ? [span, 7, 0.4] : [0.4, 7, span], isZ ? [0, 3.5, fixed] : [fixed, 3.5, 0], COLOR.brick)
+    addBox(scene, isZ ? [span, 7, 0.4] : [0.4, 7, span], isZ ? [cx, 3.5, fixed] : [fixed, 3.5, cz], COLOR.brick)
     // 朝向房間的那一面上的深色小方塊當窗
-    for (const along of [-5, 0, 5]) {
+    for (const along of [-12, -6, 0, 6, 12]) {
       for (const y of [2.5, 4.5]) {
         const dims = isZ ? [1.2, 1.5, 0.05] : [0.05, 1.5, 1.2]
-        const pos = isZ ? [along, y, fixed + 0.21] : [fixed + 0.21, y, along]
+        const pos = isZ ? [cx + along, y, fixed + 0.21] : [fixed + 0.21, y, cz + along]
         addBox(scene, dims, pos, COLOR.facadeWindow)
       }
     }
   }
-  brickFacade('z', -13, 18)
-  tree(-6.5, -9.5, 1.0, 1.6)
-  tree(-2.5, -10.2, 1.3, 2.0)
-  tree(1.8, -9.2, 0.9, 1.4)
-  tree(5.8, -10.0, 1.2, 1.8)
+  // 房間 20×15:立面離外牆約 6 公尺、長度比房間各邊多出 8 公尺以上,轉角處互相銜接不穿幫
+  brickFacade('z', ROOM.minZ - 6.5, width + 16)
+  tree(-9, -10.5, 1.0, 1.6)
+  tree(-4, -11.2, 1.3, 2.0)
+  tree(1, -10.2, 0.9, 1.4)
+  tree(6, -11, 1.2, 1.8)
+  tree(9.5, -10.6, 1.0, 1.6)
 
-  brickFacade('x', -12.5, 18)
-  tree(-11, -3, 1.0, 1.7)
-  tree(-10.6, 1, 1.3, 2.0)
-  tree(-11.2, 4.5, 0.9, 1.4)
+  brickFacade('x', ROOM.minX - 6.5, depth + 16)
+  tree(-11.6, -5, 1.0, 1.7)
+  tree(-11.9, -1, 1.3, 2.0)
+  tree(-11.6, 2.5, 0.9, 1.4)
+  tree(-12, 5.5, 1.1, 1.8)
 }
 
 const buildFurniture = () => {
+  // 會議室、會客室隔牆
+  for (const w of WALLS) addBox(scene, [w.w, ROOM.height, w.d], [w.x, ROOM.height / 2, w.z], COLOR.wall)
+  // 桌椅與固定家具的建模在 utils/office/furniture.js;尺寸與碰撞方塊一致,資源由 kit 統一釋放
+  const kit = createFurnitureKit({ paintable: true })
+  disposables.push(kit)
+  for (const f of FIXTURES) buildFixture(scene, f, kit)
+  // 椅子與紙箱:固定擺設(不被推動、不會倒),碰撞方塊在 shared/layout.js
+  for (const chair of CHAIRS) {
+    const group = new THREE.Group()
+    group.position.set(chair.x, 0, chair.z)
+    group.rotation.y = chair.side > 0 ? 0 : Math.PI // 椅子面向桌子
+    buildOfficeChair(group, { materials: kit })
+    scene.add(group)
+  }
+  for (const crate of CRATES) {
+    addBox(scene, [crate.w, crate.h, crate.d], [crate.x, crate.h / 2, crate.z], 0xc49a6c)
+    addBox(scene, [crate.w + 0.01, 0.01, 0.08], [crate.x, crate.h + 0.002, crate.z], 0xe3c79a)
+  }
   for (const desk of DESKS) {
     const group = new THREE.Group()
     group.position.set(desk.x, 0, desk.z)
-    addBox(group, [desk.w, 0.04, desk.d], [0, desk.h - 0.02, 0], COLOR.deskTop)
-    for (const sx of [-1, 1]) {
-      addBox(group, [0.05, desk.h - 0.04, desk.d - 0.1], [sx * (desk.w / 2 - 0.08), (desk.h - 0.04) / 2, 0], COLOR.yellow)
-    }
-    // 黃色隔板與螢幕:位置由 layout 計算,與碰撞資料一致
-    const part = partitionOf(desk)
-    addBox(group, [PARTITION.w, PARTITION.h, PARTITION.d], [0, desk.h + PARTITION.h / 2, part.z - desk.z], COLOR.yellow)
-    const mon = monitorOf(desk)
-    addBox(group, [MONITOR.w, MONITOR.h, MONITOR.d], [0, desk.h + MONITOR.y, mon.z - desk.z], 0x111111)
+    buildDesk(group, desk, kit)
     scene.add(group)
   }
 }
@@ -189,6 +203,9 @@ const buildViewmodel = () => {
   addBox(gun, [0.05, 0.12, 0.05], [0, -0.09, 0.02], 0x2b2b2b)
   gun.scale.setScalar(0.6)
   gun.position.set(0.2, -0.2, -0.5)
+  gun.traverse((o) => {
+    if (o.isMesh) o.userData.paintable = false // 槍是相機的一部分,不能被貼花
+  })
   camera.add(gun)
   scene.add(camera)
 }
@@ -238,7 +255,6 @@ const tick = () => {
   gun.rotation.x = recoil * 0.12
 
   remotes.update(dt)
-  objects.update(dt)
   paint.update(dt)
   renderer.render(scene, camera)
 }
@@ -272,19 +288,19 @@ onMounted(() => {
   buildViewmodel()
 
   remotes = createRemotePlayers(scene)
-  objects = createDynamicObjects(scene, DYNAMIC_DEFS)
-  // 斑點附著的宿主:被打中的玩家或可動物件
+  // 斑點附著的宿主:被打中的玩家
   paint = createPaint(scene, (msg) => {
-    if (msg.objectId) return objects.getGroup(msg.objectId)
     if (msg.targetId) return remotes.getGroup(msg.targetId)
     return null
   })
 
   controls = usePlayerControls(renderer.domElement)
-  if (import.meta.dev) window.__office = { controls, remotes, objects }
+  if (import.meta.dev) window.__office = { controls, remotes }
   const stop = watch(controls.locked, (value) => (locked.value = value))
   disposables.push({ dispose: stop })
-  renderer.domElement.addEventListener('click', controls.requestLock)
+  renderer.domElement.addEventListener('click', () => {
+    if (!chatBox.value?.isOpen) controls.requestLock() // 聊天面板開著時不鎖滑鼠,須先 Esc 關閉
+  })
   window.addEventListener('mousedown', onMouseDown)
   window.addEventListener('mouseup', onMouseUp)
 
@@ -302,7 +318,6 @@ onMounted(() => {
       for (const player of msg.players || []) {
         if (player.id !== store.myId && player.pos) remotes.applyState(player)
       }
-      objects.applyFull(msg.objects)
       paint.clear()
     },
     playerJoin: (player) => {
@@ -311,8 +326,7 @@ onMounted(() => {
       remotes.applyState(player)
     },
     playerLeave: (id) => remotes.remove(id),
-    snapshot: (players, changedObjects) => {
-      objects.applyUpdate(changedObjects)
+    snapshot: (players) => {
       const present = new Set()
       for (const player of players) {
         if (player.id === store.myId || !player.pos) continue
@@ -355,7 +369,6 @@ onBeforeUnmount(() => {
   network?.disconnect()
   controls?.dispose()
   remotes?.dispose()
-  objects?.dispose()
   paint?.dispose()
   disposables.forEach((item) => item.dispose())
   if (import.meta.dev) delete window.__office
@@ -381,29 +394,51 @@ onBeforeUnmount(() => {
       v-show="hitFlash.key > 0"
     ></div>
 
-    <div class="pointer-events-none absolute left-4 top-4 rounded bg-black/50 px-3 py-2 text-sm text-white">
-      <p>{{ nickname }}・{{ poseLabel }}</p>
-      <p class="mt-1 text-xs text-white/70">
-        WASD 移動 ・ 滑鼠視角 ・ 左鍵射擊 ・ C 蹲 ・ Z 趴 ・ Enter 聊天 ・ Esc 釋放滑鼠
-      </p>
+    <!-- 左上:場景名稱 -->
+    <div class="pointer-events-none absolute left-4 top-4 rounded-2xl bg-white/90 px-5 py-3 text-lg font-bold text-neutral-800 shadow">
+      OfficeRoom <span class="mx-1 text-neutral-300">|</span> 3D 辦公室
     </div>
 
-    <div class="pointer-events-none absolute right-4 top-4 min-w-32 rounded bg-black/50 px-3 py-2 text-sm text-white">
-      <p class="mb-1 text-xs text-white/70">線上 {{ store.roster.length }} / 10</p>
-      <p v-for="player in store.roster" :key="player.id" class="flex items-center gap-2">
-        <span class="inline-block h-2.5 w-2.5 rounded-full" :style="{ background: colorCss(player.color) }"></span>
-        {{ player.name }}<span v-if="player.id === store.myId" class="text-white/50">(你)</span>
-      </p>
-    </div>
-
+    <!-- 上方中央:連線狀態與目前姿勢 -->
     <p
-      v-if="statusText"
-      class="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded bg-red-600/80 px-3 py-1 text-sm text-white"
+      class="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full px-4 py-2 text-sm shadow"
+      :class="statusText ? 'bg-red-600/90 text-white' : 'bg-white/90 text-neutral-700'"
     >
-      {{ statusText }}
+      <template v-if="statusText">{{ statusText }}</template>
+      <template v-else>🎯 漆彈對戰 · 線上 {{ store.roster.length }}/10 · {{ poseLabel }}</template>
     </p>
 
-    <OfficeChatBox ref="chatBox" :messages="store.chat" @send="onChatSend" @close="onChatClose" />
+    <!-- 右上:連線、人數、暱稱、登出 -->
+    <div class="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-4 pr-1.5 text-sm text-neutral-700 shadow">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block h-2.5 w-2.5 rounded-full" :class="store.netStatus === 'online' ? 'bg-green-500' : 'bg-amber-400'"></span>
+        {{ store.netStatus === 'online' ? '已連線' : '連線中' }}
+      </span>
+      <button class="rounded-full bg-neutral-100 px-3 py-1 hover:bg-neutral-200" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
+        👥 {{ store.roster.length }}
+      </button>
+      <span class="px-1">你是 <b>{{ nickname }}</b></span>
+      <button class="rounded-full bg-neutral-800 px-4 py-1 font-bold text-white hover:bg-neutral-600" @click="emit('logout')">登出</button>
+    </div>
+
+    <OfficeChatBox
+      ref="chatBox"
+      :messages="store.chat"
+      :roster="store.roster"
+      :my-id="store.myId"
+      @send="onChatSend"
+      @close="onChatClose"
+    />
+
+    <!-- 下方:操作提示 -->
+    <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 text-xs text-neutral-700">
+      <p class="pointer-events-none rounded-full bg-white/90 px-4 py-2 shadow">
+        🎯 左鍵開槍(按住連射) · WASD 移動 · C 蹲 · Z 趴 · Enter 聊天 · Esc 收起來
+      </p>
+      <button class="rounded-full bg-white/90 px-4 py-2 font-bold shadow hover:bg-white" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
+        動作與聊天
+      </button>
+    </div>
 
     <div
       v-if="!locked && !chatBox?.isOpen"

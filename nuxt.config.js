@@ -9,22 +9,23 @@ export default defineNuxtConfig({
   app: {
     baseURL: '/',
     head: {
-      title: process.env.APP_TITLE,
+      title: '叁角辦公室',
       htmlAttrs: {
-        lang: process.env.APP_DEFAULT_LANG,
+        lang: 'zh-TW',
       },
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { hid: 'description', name: 'description', content: process.env.APP_DESC },
+        { hid: 'description', name: 'description', content: '叁角辦公室:同事線上連線的 3D 虛擬辦公室' },
         { name: 'format-detection', content: 'telephone=no' },
-        { property: 'og:title', content: process.env.APP_TITLE },
+        { property: 'og:title', content: '叁角辦公室' },
         { property: 'og:description', content: process.env.APP_DESC },
-        { property: 'og:site_name', content: process.env.APP_TITLE },
+        { property: 'og:site_name', content: '叁角辦公室' },
         { property: 'og:locale', content: process.env.APP_DEFAULT_LANG },
         { property: 'og:image:width', content: '1200' },
         { property: 'og:image:height', content: '630' },
       ],
+      link: [{ rel: 'icon', type: 'image/png', href: '/favicon.png' }],
       noscript: [{ children: 'JavaScript is required' }],
     },
   },

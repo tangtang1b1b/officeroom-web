@@ -5,7 +5,6 @@ import {
   cooldownReady,
   createMoveBucket,
   evaluateMove,
-  refundMove,
   pickSpawnPoint,
   isShootOriginValid,
   spawnYaw,
@@ -26,7 +25,7 @@ import {
 import { isBlocked } from '../shared/collision.js'
 import { COLLIDERS, ROOM, PLAYER, SPAWN_POINTS } from '../shared/layout.js'
 
-const player = (pose = 'stand', pos = [-6, 0, 0], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
+const player = (pose = 'stand', pos = [-6, 0, 2.65], t = 0) => ({ pos, pose, move: createMoveBucket(t) })
 
 describe('token bucket movement', () => {
   it('allows legitimate walking speed over time', () => {
@@ -34,14 +33,14 @@ describe('token bucket movement', () => {
     let t = 0
     for (let i = 0; i < 40; i++) {
       t += 50
-      const r = evaluateMove(p, [p.pos[0] + PLAYER.walkSpeed.stand * 0.05, 0, 0], t)
+      const r = evaluateMove(p, [p.pos[0] + PLAYER.walkSpeed.stand * 0.05, 0, 2.65], t)
       expect(r.ok).toBe(true)
       p.pos = r.pos
     }
   })
   it('rejects teleport beyond budget cap', () => {
     const p = player()
-    const r = evaluateMove(p, [-6 + MOVE_BUDGET_CAP + 0.5, 0, 0], 1000)
+    const r = evaluateMove(p, [-6 + MOVE_BUDGET_CAP + 0.5, 0, 2.65], 1000)
     expect(r).toEqual({ ok: false, reason: 'speed' })
   })
   it('does not allow sustained speeding via many small steps', () => {
@@ -50,7 +49,7 @@ describe('token bucket movement', () => {
     let rejected = 0
     for (let i = 0; i < 100; i++) {
       t += 50
-      const r = evaluateMove(p, [p.pos[0] + 0.3, 0, 0], t) // 6 m/s
+      const r = evaluateMove(p, [p.pos[0] + 0.3, 0, 2.65], t) // 6 m/s
       if (r.ok) p.pos = r.pos
       else rejected++
       if (p.pos[0] > 5) break
@@ -61,12 +60,12 @@ describe('token bucket movement', () => {
   })
   it('uses current pose speed (prone is slow)', () => {
     const p = player('prone')
-    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1, 0, 0], 1000).ok).toBe(true) // 用掉幾乎整個額度
-    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1 + 0.5, 0, 0], 1100).ok).toBe(false) // 只補回約 0.1
+    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1, 0, 2.65], 1000).ok).toBe(true) // 用掉幾乎整個額度
+    expect(evaluateMove(p, [-6 + MOVE_BUDGET_CAP - 0.1 + 0.5, 0, 2.65], 1100).ok).toBe(false) // 只補回約 0.1
   })
   it('rejected move does not consume budget', () => {
     const p = player()
-    evaluateMove(p, [-3, 0, 0], 0)
+    evaluateMove(p, [-3, 0, 2], 0)
     expect(p.move.budget).toBe(MOVE_BUDGET_CAP)
   })
   it('rejects positions inside colliders', () => {
@@ -107,18 +106,18 @@ describe('rate limiting', () => {
 })
 
 describe('shoot origin', () => {
-  const pos = [-6, 0, 0]
+  const pos = [-6, 0, 2]
   it('accepts near position at stand/prone eye heights', () => {
-    expect(isShootOriginValid([-6, PLAYER.eyeHeight.stand, 0.2], pos)).toBe(true)
-    expect(isShootOriginValid([-6, PLAYER.eyeHeight.prone, 0], pos)).toBe(true)
-    expect(isShootOriginValid([-5, PLAYER.eyeHeight.stand, 0], pos)).toBe(true) // 伺服器落後 1m
+    expect(isShootOriginValid([-6, PLAYER.eyeHeight.stand, 2.2], pos)).toBe(true)
+    expect(isShootOriginValid([-6, PLAYER.eyeHeight.prone, 2], pos)).toBe(true)
+    expect(isShootOriginValid([-5, PLAYER.eyeHeight.stand, 2], pos)).toBe(true) // 伺服器落後 1m
   })
   it('rejects horizontally too far', () => {
-    expect(isShootOriginValid([-4, PLAYER.eyeHeight.stand, 0], pos)).toBe(false)
+    expect(isShootOriginValid([-4, PLAYER.eyeHeight.stand, 2], pos)).toBe(false)
   })
   it('rejects y out of eye-height range', () => {
-    expect(isShootOriginValid([-6, PLAYER.eyeHeight.stand + 0.5, 0], pos)).toBe(false)
-    expect(isShootOriginValid([-6, 0.1, 0], pos)).toBe(false)
+    expect(isShootOriginValid([-6, PLAYER.eyeHeight.stand + 0.5, 2], pos)).toBe(false)
+    expect(isShootOriginValid([-6, 0.1, 2], pos)).toBe(false)
   })
   it('rejects origin inside a collider', () => {
     const desk = COLLIDERS.find((b) => b.id.startsWith('desk'))
@@ -210,11 +209,11 @@ describe('spawn yaw and origin check', () => {
 describe('collision.isBlocked', () => {
   it('blocks outside room and allows open floor', () => {
     expect(isBlocked(ROOM.maxX, 0)).toBe(true)
-    expect(isBlocked(ROOM.minX + PLAYER.radius, 0)).toBe(false)
-    expect(isBlocked(-6, 0)).toBe(false)
+    expect(isBlocked(ROOM.minX + PLAYER.radius, -5)).toBe(false)
+    expect(isBlocked(-6, 2.65)).toBe(false)
   })
   it('blocks inside collider, free just outside radius', () => {
-    const b = COLLIDERS.find((c) => c.id === 'desk-0--1')
+    const b = COLLIDERS.find((c) => c.id === 'desk-5--1')
     const cx = (b.min[0] + b.max[0]) / 2
     const cz = (b.min[2] + b.max[2]) / 2
     expect(isBlocked(cx, cz)).toBe(true)
@@ -226,35 +225,20 @@ describe('collision.isBlocked', () => {
   })
 })
 
-describe('refundMove', () => {
-  it('returns the spent budget, capped at MOVE_BUDGET_CAP', () => {
-    const p = player()
-    const r = evaluateMove(p, [p.pos[0] + 1, 0, p.pos[2]], p.move.at)
-    expect(r.ok).toBe(true)
-    expect(r.cost).toBeCloseTo(1, 9)
-    const after = p.move.budget
-    refundMove(p.move, r.cost)
-    expect(p.move.budget).toBeCloseTo(after + 1, 9)
-    refundMove(p.move, 100)
-    expect(p.move.budget).toBe(MOVE_BUDGET_CAP)
-    refundMove(p.move, -5)
-    expect(p.move.budget).toBe(MOVE_BUDGET_CAP)
-  })
-})
-
 describe('pickSpawnPoint', () => {
-  const pts = [{ x: 0, z: 0 }, { x: 10, z: 0 }]
-  it('skips candidates overlapping an object', () => {
-    const objs = [{ x: 10.2, z: 0, radius: 0.3 }]
-    expect(pickSpawnPoint(pts, [[8, 0, 0]], objs)).toEqual({ x: 0, z: 0 })
+  it('skips candidates inside a static collider', () => {
+    const b = COLLIDERS.find((c) => c.id === 'chair-0-1')
+    const blocked = { x: (b.min[0] + b.max[0]) / 2, z: (b.min[2] + b.max[2]) / 2 }
+    expect(pickSpawnPoint([blocked, { x: 0, z: 2.6 }], [[blocked.x, 0, blocked.z]])).toEqual({ x: 0, z: 2.6 })
   })
-  it('falls back to the original logic when all overlap', () => {
-    const objs = [{ x: 0, z: 0, radius: 0.3 }, { x: 10, z: 0, radius: 0.3 }]
-    expect(pickSpawnPoint(pts, [[8, 0, 0]], objs)).toEqual({ x: 0, z: 0 })
+  it('falls back to all points when every candidate is blocked', () => {
+    const b = COLLIDERS.find((c) => c.id === 'chair-0-1')
+    const blocked = { x: (b.min[0] + b.max[0]) / 2, z: (b.min[2] + b.max[2]) / 2 }
+    expect(pickSpawnPoint([blocked], [])).toEqual(blocked)
   })
-  it('real spawn points are free of the initial dynamic objects', async () => {
-    const { DYNAMIC_DEFS } = await import('../shared/layout.js')
-    const sp = pickSpawnPoint(SPAWN_POINTS, [], DYNAMIC_DEFS)
-    expect(DYNAMIC_DEFS.some((o) => Math.hypot(o.x - sp.x, o.z - sp.z) < PLAYER.radius + o.radius + 0.05)).toBe(false)
+  it('real spawn points are all walkable and the pick is the farthest', () => {
+    for (const sp of SPAWN_POINTS) expect(isBlocked(sp.x, sp.z)).toBe(false)
+    const sp = pickSpawnPoint(SPAWN_POINTS, [[-8, 0, 1.5]])
+    expect(sp.x).toBeGreaterThan(0)
   })
 })

@@ -1,13 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { raycastBoxes, raycastPlayer, raycastRoom, raycastWorld } from '../shared/raycast.js'
-import { COLLIDERS, ROOM } from '../shared/layout.js'
-import { createObjects } from '../shared/physics.js'
+import { COLLIDERS, ROOM, CHAIRS, CRATES } from '../shared/layout.js'
 
 const close = (a, b) => expect(a).toBeCloseTo(b, 5)
 
 describe('raycastBoxes', () => {
   it('hits desk top from above', () => {
-    const hit = raycastBoxes([0, 2, -2.4], [0, -1, 0], COLLIDERS, 10)
+    const hit = raycastBoxes([-1.55, 2, -3.495], [0, -1, 0], COLLIDERS, 10) // desk-2--1 正上方
     expect(hit).not.toBeNull()
     close(hit.distance, 1.25)
     expect(hit.normal).toEqual([0, 1, 0])
@@ -15,17 +14,17 @@ describe('raycastBoxes', () => {
   })
 
   it('returns nearest box and side normal', () => {
-    const hit = raycastBoxes([0, 0.5, -4.5], [0, 0, 1], COLLIDERS, 20)
-    expect(hit.box.id).toMatch(/^desk/)
+    const hit = raycastBoxes([-1.55, 0.5, -6.5], [0, 0, 1], COLLIDERS, 20)
+    expect(hit.box.id).toBe('chair-2--1') // 椅子在桌子前方,先被擊中
     expect(hit.normal).toEqual([0, 0, -1])
   })
 
   it('respects maxDist', () => {
-    expect(raycastBoxes([0, 0.5, -4.5], [0, 0, 1], COLLIDERS, 0.5)).toBeNull()
+    expect(raycastBoxes([-1.55, 0.5, -6.5], [0, 0, 1], COLLIDERS, 0.5)).toBeNull()
   })
 
   it('misses when pointing away', () => {
-    expect(raycastBoxes([0, 0.5, -4.5], [0, 0, -1], COLLIDERS, 20)).toBeNull()
+    expect(raycastBoxes([-1.55, 0.5, -6.5], [0, 0, -1], COLLIDERS, 20)).toBeNull()
   })
 
   it('origin inside box returns distance 0 hit', () => {
@@ -138,10 +137,10 @@ describe('raycastPlayer', () => {
     expect(hit.part).toBe('torso')
   })
   it('raycastWorld passes yaw and part for prone', () => {
-    const hit = raycastWorld([2, 0.15, 0], [0, 0, 1], { players: [{ id: 'b', pos: P, pose: 'prone', yaw: 0 }] })
+    const hit = raycastWorld([9.3, 0.15, 0], [0, 0, 1], { players: [{ id: 'b', pos: [9.3, 0, 3], pose: 'prone', yaw: 0 }] })
     expect(hit.kind).toBe('player')
     expect(hit.part).toBe('head')
-    const miss = raycastWorld([2.1, 0.1, 0], [0, 0, 1], { players: [{ id: 'b', pos: P, pose: 'prone', yaw: Math.PI }] })
+    const miss = raycastWorld([9.4, 0.1, 0], [0, 0, 1], { players: [{ id: 'b', pos: [9.3, 0, 3], pose: 'prone', yaw: Math.PI }] })
     // yaw=π: 身體向 +z 延伸(z 3~4.75),從 z=0 先碰到腳底端面
     expect(miss.kind).toBe('player')
     // yaw=π 時右 = -x,x=2.1 在玩家(x=2)的 +x 側 → 是左腿
@@ -155,52 +154,45 @@ describe('raycastPlayer', () => {
 
 describe('raycastWorld', () => {
   it('hits wall', () => {
-    const hit = raycastWorld([2, 1.6, 0], [0, 0, 1])
+    const hit = raycastWorld([9.3, 1.6, 0], [0, 0, 1])
     expect(hit.kind).toBe('wall')
-    close(hit.distance, 5)
+    close(hit.distance, ROOM.maxZ)
   })
   it('hits desk', () => {
-    const hit = raycastWorld([0, 2, -2.4], [0, -1, 0])
+    const hit = raycastWorld([-1.55, 2, -3.495], [0, -1, 0])
     expect(hit.kind).toBe('box')
   })
   it('hits player with targetId', () => {
-    const hit = raycastWorld([2, 1.6, 0], [0, 0, 1], { players: [{ id: 'b', pos: [2, 0, 3], pose: 'stand' }] })
+    const hit = raycastWorld([9.3, 1.6, 0], [0, 0, 1], { players: [{ id: 'b', pos: [9.3, 0, 3], pose: 'stand' }] })
     expect(hit.kind).toBe('player')
     expect(hit.targetId).toBe('b')
     expect(hit.part).toBe('head')
   })
   it('ignores shooter', () => {
-    const hit = raycastWorld([2, 1.6, 0], [0, 0, 1], {
-      players: [{ id: 'a', pos: [2, 0, 0.1], pose: 'stand' }],
+    const hit = raycastWorld([9.3, 1.6, 0], [0, 0, 1], {
+      players: [{ id: 'a', pos: [9.3, 0, 0.1], pose: 'stand' }],
       ignoreId: 'a',
     })
     expect(hit.kind).toBe('wall')
   })
   it('player behind a desk/chair is blocked', () => {
-    const hit = raycastWorld([0, 0.6, -4.5], [0, 0, 1], { players: [{ id: 'b', pos: [0, 0, -1], pose: 'stand' }] })
+    const hit = raycastWorld([-1.55, 0.6, -6.5], [0, 0, 1], { players: [{ id: 'b', pos: [-1.55, 0, -1], pose: 'stand' }] })
     expect(hit.kind).toBe('box')
   })
 })
 
-describe('raycastWorld with objects', () => {
-  const objects = createObjects([
-    { id: 'o1', kind: 'chair', x: 5.5, z: 0, yaw: 0, radius: 0.3, height: 1.25, mass: 1, canFall: true },
-  ])
-  it('hits an object and reports objectId', () => {
-    const hit = raycastWorld([4, 0.6, 0], [1, 0, 0], { objects })
-    expect(hit.kind).toBe('object')
-    expect(hit.objectId).toBe('o1')
-    close(hit.distance, 1.2)
+describe('raycastWorld with static chairs and crates', () => {
+  it('a chair blocks a shot as a box', () => {
+    const c = CHAIRS[0]
+    const hit = raycastWorld([c.x - 3, 0.6, c.z], [1, 0, 0])
+    expect(hit.kind).toBe('box')
+    expect(hit.boxId).toBe(c.id)
     expect(hit.normal).toEqual([-1, 0, 0])
+    expect(hit.objectId).toBeUndefined()
   })
-  it('fallen object is low: high shot passes over, low shot hits', () => {
-    objects[0].state = 'down'
-    expect(raycastWorld([4, 1.0, 0], [1, 0, 0], { objects }).kind).toBe('wall')
-    expect(raycastWorld([4, 0.3, 0], [1, 0, 0], { objects }).kind).toBe('object')
-    objects[0].state = 'up'
-  })
-  it('nearer player wins over object', () => {
-    const hit = raycastWorld([4, 1, 0], [1, 0, 0], { objects, players: [{ id: 'p', pos: [4.6, 0, 0], pose: 'stand' }] })
-    expect(hit.kind).toBe('player')
+  it('a crate blocks a low shot but a high shot passes over', () => {
+    const c = CRATES[0]
+    expect(raycastWorld([c.x - 3, 0.2, c.z], [1, 0, 0]).boxId).toBe(c.id)
+    expect(raycastWorld([c.x - 3, 1.0, c.z], [1, 0, 0]).kind).toBe('wall')
   })
 })

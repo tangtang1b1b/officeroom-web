@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 
 const MAX_SPLATS = 150
 const TRACER_LIFE = 0.12
@@ -7,7 +8,6 @@ const FORWARD = new THREE.Vector3(0, 0, 1)
 // 漆彈斑點(貼在牆、家具或玩家身上)與彈道
 // getHost(msg):回傳斑點要附著的群組(被打中的玩家或可動物件),沒有則為 null
 export const createPaint = (scene, getHost) => {
-  const splatGeometry = new THREE.CircleGeometry(1, 20)
   const materials = new Map()
   const splats = []
   const tracers = []
@@ -29,7 +29,12 @@ export const createPaint = (scene, getHost) => {
     return materials.get(key)
   }
 
-  const removeSplat = (group) => group.parent?.remove(group)
+  const removeSplat = (decals) => {
+    for (const d of decals) {
+      d.parent?.remove(d)
+      d.geometry.dispose()
+    }
+  }
 
   // 命中玩家時,找出真正被打中的身體方塊與表面點:
   // 先從射擊起點朝命中點對實際模型做射線(最準);因網路插值模型可能稍有落差而打空時,
@@ -70,37 +75,105 @@ export const createPaint = (scene, getHost) => {
     return { mesh: best.mesh, point: best.mesh.localToWorld(best.surface.clone()), normal }
   }
 
+  // 貼花:把被投影盒切出的三角形貼合在目標網格表面(轉角會沿兩面彎折)
+  const dummy = new THREE.Object3D()
+  const box = new THREE.Box3()
+  const meshBox = new THREE.Box3()
+  const sizeVec = new THREE.Vector3()
+  const makeDecal = (mesh, center, quaternion, size) => {
+    mesh.updateMatrixWorld(true)
+    box.setFromCenterAndSize(center, sizeVec.set(size * 1.8, size * 1.8, size * 1.8))
+    if (!meshBox.setFromObject(mesh).intersectsBox(box)) return null
+    let geometry
+    try {
+      // 薄物(隔板、螢幕等,任一邊 < 8cm)縮小投影深度,避免貼花穿透到背面
+      const thin = Math.min(...meshBox.getSize(sizeVec).toArray()) < 0.08
+      geometry = new DecalGeometry(mesh, center, new THREE.Euler().setFromQuaternion(quaternion), new THREE.Vector3(size, size, thin ? 0.04 : size))
+    } catch {
+      return null
+    }
+    if (!geometry.getAttribute('position')?.count) {
+      geometry.dispose()
+      return null
+    }
+    return geometry
+  }
+
+  // 產生一個斑點(主斑 + 小水滴)貼到 targets;attach=true 時頂點轉成各網格局部座標並掛在該網格下
+  const buildSplat = (targets, pos, n, material, sizes, attach) => {
+    const decals = []
+    const center = new THREE.Vector3(...pos)
+    const base = new THREE.Quaternion().setFromUnitVectors(FORWARD, n)
+    const tangent = new THREE.Vector3()
+    sizes.forEach((size, i) => {
+      const spin = new THREE.Quaternion().setFromAxisAngle(FORWARD, Math.random() * Math.PI * 2)
+      dummy.quaternion.copy(base).multiply(spin)
+      const c = center.clone()
+      if (i > 0) { // 小水滴散在主斑周圍
+        const angle = Math.random() * Math.PI * 2
+        const dist = sizes[0] * (0.7 + Math.random() * 0.5)
+        tangent.set(Math.cos(angle) * dist, Math.sin(angle) * dist, 0).applyQuaternion(base)
+        c.add(tangent)
+      }
+      for (const target of targets) {
+        const geometry = makeDecal(target, c, dummy.quaternion, size)
+        if (!geometry) continue
+        const decal = new THREE.Mesh(geometry, material)
+        decal.userData.isSplat = true
+        if (attach) {
+          geometry.applyMatrix4(target.matrixWorld.clone().invert())
+          target.add(decal)
+        } else {
+          scene.add(decal)
+        }
+        decals.push(decal)
+      }
+    })
+    return decals
+  }
+
+  const meshesOf = (root) => {
+    const list = []
+    root.traverse((o) => {
+      if (o.isMesh && !o.userData.isSplat) list.push(o)
+    })
+    return list
+  }
+
   const addSplat = (msg) => {
     const host = getHost(msg)
     const onBody = msg.targetId && host ? locateOnBody(msg, host) : null
     const pos = onBody ? onBody.point.toArray() : msg.pos
     const normal = onBody ? onBody.normal.toArray() : msg.normal
-    const { color } = msg
-    const material = materialFor(color)
-    const group = new THREE.Group()
-    const main = new THREE.Mesh(splatGeometry, material)
-    main.scale.setScalar(0.1 + Math.random() * 0.07)
-    group.add(main)
-    for (let i = 0; i < (onBody ? 0 : 3); i++) { // 身體方塊太小,外圍小點會懸空,不畫
-      const drop = new THREE.Mesh(splatGeometry, material)
-      const angle = Math.random() * Math.PI * 2
-      const dist = 0.12 + Math.random() * 0.1
-      drop.scale.setScalar(0.02 + Math.random() * 0.03)
-      drop.position.set(Math.cos(angle) * dist, Math.sin(angle) * dist, 0)
-      group.add(drop)
-    }
+    const material = materialFor(msg.color)
     const n = new THREE.Vector3(...normal).normalize()
-    group.position.set(pos[0] + n.x * 0.012, pos[1] + n.y * 0.012, pos[2] + n.z * 0.012)
-    group.quaternion.setFromUnitVectors(FORWARD, n)
-    group.rotateZ(Math.random() * Math.PI * 2)
-    // 身體方塊較小,斑點縮小以免大半懸在邊緣外
-    if (onBody) group.scale.setScalar(onBody.mesh.userData.part === 'torso' ? 0.7 : 0.45)
+    // 往外推一點,讓投影盒中心落在表面外側而非剛好貼面
+    const p = [pos[0] + n.x * 0.005, pos[1] + n.y * 0.005, pos[2] + n.z * 0.005]
 
-    scene.add(group)
-    // 保留世界座標,之後跟著被打中的方塊(身體部位)或物件移動
-    ;(onBody ? onBody.mesh : host)?.attach(group)
+    // 身體方塊較小,斑點縮小
+    const scale = onBody ? (onBody.mesh.userData.part === 'torso' ? 0.7 : 0.45) : 1
+    const main = (0.12 + Math.random() * 0.08) * scale
+    const sizes = [main]
+    const drops = onBody ? 2 : 3
+    for (let i = 0; i < drops; i++) sizes.push((0.03 + Math.random() * 0.03) * scale)
 
-    splats.push(group)
+    let targets
+    let attach = true
+    if (onBody) {
+      targets = host.userData.bodyMeshes
+    } else if (host) {
+      targets = meshesOf(host)
+    } else {
+      targets = []
+      attach = false
+      scene.traverse((o) => {
+        if (o.isMesh && o.userData.paintable === true) targets.push(o)
+      })
+    }
+    const decals = buildSplat(targets, p, n, material, sizes, attach)
+    if (!decals.length) return
+
+    splats.push(decals)
     if (splats.length > MAX_SPLATS) removeSplat(splats.shift())
   }
 
@@ -121,7 +194,10 @@ export const createPaint = (scene, getHost) => {
   const update = (dt) => {
     // 宿主(離開的玩家、被移除的物件)已不在場景:斑點一併丟棄,避免撐住已釋放的物件樹並佔用名額
     for (let i = splats.length - 1; i >= 0; i--) {
-      if (!inScene(splats[i])) splats.splice(i, 1)
+      if (!inScene(splats[i][0])) {
+        removeSplat(splats[i])
+        splats.splice(i, 1)
+      }
     }
     for (let i = tracers.length - 1; i >= 0; i--) {
       const tracer = tracers[i]
@@ -156,7 +232,6 @@ export const createPaint = (scene, getHost) => {
         t.line.material.dispose()
       })
       tracers.length = 0
-      splatGeometry.dispose()
       materials.forEach((m) => m.dispose())
     },
   }

@@ -1,12 +1,15 @@
 // 辦公室格局資料(前端渲染、碰撞與伺服器射線檢測共用,純資料不依賴任何框架)
 // 座標:x 向右、y 向上、z 向前(角色與相機 yaw=0 時朝 -z),單位公尺。
-// 暫時版格局,日後依實際照片與尺寸調整。
+// 依使用者手繪草圖概估(尺寸為估計值,日後依實際尺寸微調)。草圖為直式梯形,
+// 這裡轉 90° 使長邊沿 x、桌子方向與桌子模型一致,並以外接矩形近似斜牆。
+// 區域:x<5.2 且 z>3.4 為會議室(x<0.4)與會客室(0.4<x<5.2);其餘為開放辦公區。
+// 房間 20×15,桌組間通道約 1.5m、桌組與牆至少 1.2m。
 
 export const ROOM = {
-  minX: -7,
-  maxX: 7,
-  minZ: -5,
-  maxZ: 5,
+  minX: -10,
+  maxX: 10,
+  minZ: -7.5,
+  maxZ: 7.5,
   height: 3,
 }
 
@@ -93,16 +96,17 @@ export const HIT_PARTS = buildHitParts()
 
 const DESK = { w: 1.6, d: 0.75, h: 0.75 }
 const CHAIR = { w: 0.55, d: 0.55, h: 0.9 }
-const CHAIR_COLLIDER_HEIGHT = 1.25 // 含椅背與頭枕
+const CHAIR_COLLIDER = { w: 0.5, d: 0.5 }
+const CHAIR_COLLIDER_HEIGHT = 1.15 // 含椅背與頭枕(轉椅總高約 1.12)
 
-// 桌組:每組兩張桌子背對背,椅子在兩側
+// 桌組:每組兩張桌子背對背,椅子在兩側;位置對應草圖中黃色桌組由左上往右下排列
 const CLUSTER_CENTERS = [
-  { x: -4, z: -2 },
-  { x: 0, z: -2 },
-  { x: 4, z: -2 },
-  { x: -4, z: 2 },
-  { x: 0, z: 2 },
-  { x: 4, z: 2 },
+  { x: -7.75, z: -1.9 },
+  { x: -4.65, z: -2.5 },
+  { x: -1.55, z: -3.1 },
+  { x: 1.55, z: -3.7 },
+  { x: 4.65, z: -4.3 },
+  { x: 7.75, z: -4.9 },
 ]
 
 export const DESKS = []
@@ -122,6 +126,7 @@ CLUSTER_CENTERS.forEach((center, index) => {
       x: center.x,
       z: center.z + side * (DESK.d + 0.55),
       side,
+      yaw: side > 0 ? 0 : Math.PI,
       ...CHAIR,
     })
   })
@@ -129,8 +134,34 @@ CLUSTER_CENTERS.forEach((center, index) => {
 
 // 紙箱(搬家感)
 export const CRATES = [
-  { id: 'crate-0', x: -6.2, z: -4.2, w: 0.7, d: 0.5, h: 0.45 },
-  { id: 'crate-1', x: -5.4, z: -4.4, w: 0.6, d: 0.5, h: 0.4 },
+  { id: 'crate-0', x: 8.6, z: 5.8, w: 0.7, d: 0.5, h: 0.45 },
+  { id: 'crate-1', x: 7.8, z: 6.1, w: 0.6, d: 0.5, h: 0.4 },
+]
+
+const WALL_T = 0.2
+// 室內隔牆(會議室、會客室),門口留缺口。{ id, x, z, w, d }:中心與尺寸
+const wallX = (id, x0, x1, z) => ({ id, x: (x0 + x1) / 2, z, w: x1 - x0, d: WALL_T })
+const wallZ = (id, x, z0, z1) => ({ id, x, z: (z0 + z1) / 2, w: WALL_T, d: z1 - z0 })
+export const WALLS = [
+  wallX('wall-a', -10, -6, 3.4), // 會議室門在 x -6 ~ -4.8
+  wallX('wall-b', -4.8, 2.4, 3.4), // 會客室門在 x 2.4 ~ 3.6
+  wallX('wall-c', 3.6, 5.3, 3.4),
+  wallZ('wall-d', 0.4, 3.4, 7.5), // 會議室與會客室之間
+  wallZ('wall-e', 5.2, 3.4, 7.5), // 會客室底牆
+]
+
+// 固定家具(桌、櫃、沙發):{ id, kind, x, z, w, d, h },kind 決定外觀
+export const FIXTURES = [
+  { id: 'meeting-table', kind: 'table', x: -3.2, z: 5.6, w: 3.4, d: 1.2, h: 0.75 },
+  { id: 'table-a', kind: 'table', x: -9.5, z: 0.6, w: 0.9, d: 1.0, h: 0.75 },
+  { id: 'table-b', kind: 'table', x: -9.5, z: 1.8, w: 0.9, d: 1.0, h: 0.75 },
+  { id: 'sofa', kind: 'sofa', x: 2.8, z: 7.05, w: 2.4, d: 0.8, h: 0.85 },
+  { id: 'coffee-table', kind: 'table', x: 2.8, z: 5.4, w: 1.2, d: 0.6, h: 0.45 },
+  // 草圖藍色長條:高書櫃(中間留 x -0.8 ~ 0.8 走道)與矮櫃
+  { id: 'shelf-a', kind: 'shelf', x: -2.2, z: 1.0, w: 2.8, d: 0.54, h: 1.9 },
+  { id: 'shelf-b', kind: 'shelf', x: 2.0, z: 1.0, w: 2.4, d: 0.54, h: 1.9 },
+  { id: 'locker-a', kind: 'locker', x: -2.45, z: 1.65, w: 3.1, d: 0.66, h: 0.9 },
+  { id: 'locker-b', kind: 'locker', x: 2.05, z: 1.65, w: 2.3, d: 0.66, h: 0.9 },
 ]
 
 // 桌面上的隔板與螢幕:尺寸與位置(相對桌子中心)同時供渲染與碰撞使用
@@ -154,8 +185,10 @@ const box = (id, x, z, w, d, minY, maxY) => ({
   max: [x + w / 2, maxY, z + d / 2],
 })
 
-// 所有實心碰撞方塊;牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
+// 所有實心碰撞方塊;外牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
 export const COLLIDERS = [
+  ...WALLS.map((w) => box(w.id, w.x, w.z, w.w, w.d, 0, ROOM.height)),
+  ...FIXTURES.map((f) => box(f.id, f.x, f.z, f.w, f.d, 0, f.h)),
   ...DESKS.flatMap((desk) => {
     const part = partitionOf(desk)
     const mon = monitorOf(desk)
@@ -165,40 +198,16 @@ export const COLLIDERS = [
       box(`${desk.id}-monitor`, mon.x, mon.z, mon.w, mon.d, desk.h + mon.y - mon.h / 2, desk.h + mon.y + mon.h / 2),
     ]
   }),
-]
-
-// 可動物件(椅子、紙箱):由伺服器物理模擬,不屬於固定碰撞 COLLIDERS。
-// 俯視 2D 圓形剛體;椅子 yaw=0 時面向 -z。
-export const DYNAMIC_DEFS = [
-  ...CHAIRS.map((chair) => ({
-    id: chair.id,
-    kind: 'chair',
-    x: chair.x,
-    z: chair.z,
-    yaw: chair.side > 0 ? 0 : Math.PI,
-    radius: 0.3,
-    height: CHAIR_COLLIDER_HEIGHT,
-    mass: 1,
-    canFall: true,
-  })),
-  ...CRATES.map((crate) => ({
-    id: crate.id,
-    kind: 'crate',
-    x: crate.x,
-    z: crate.z,
-    yaw: 0,
-    radius: Math.max(crate.w, crate.d) / 2,
-    height: crate.h,
-    mass: 1.5,
-    canFall: false,
-  })),
+  // 椅子與紙箱:固定靜態方塊(椅子 yaw=0 面向 -z,side>0 → 0、side<0 → π)
+  ...CHAIRS.map((c) => box(c.id, c.x, c.z, CHAIR_COLLIDER.w, CHAIR_COLLIDER.d, 0, CHAIR_COLLIDER_HEIGHT)),
+  ...CRATES.map((c) => box(c.id, c.x, c.z, c.w, c.d, 0, c.h)),
 ]
 
 export const SPAWN_POINTS = [
-  { x: -6, z: 0 },
-  { x: 6, z: 0 },
-  { x: 0, z: -4.2 },
-  { x: 0, z: 4.2 },
-  { x: -6, z: 4 },
-  { x: 6, z: -4 },
+  { x: -8, z: 1.5 },
+  { x: -6.2, z: 1.8 },
+  { x: 4.2, z: 1.0 },
+  { x: 8.5, z: 0.5 },
+  { x: 8.5, z: 2.5 },
+  { x: 0, z: 2.6 },
 ]
