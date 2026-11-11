@@ -82,3 +82,10 @@
 - 驗證結果：localhost 外部視角重播至會車時截圖確認對向車車頭朝向機車迎面接近；`.road-scene canvas` selector 命中 1 個，computed `display:block`，尺寸 1467.4×1039.4；截圖中模型已載入且車頭可辨識。重新讀取修改程式與差異確認只增加對向模型 180 度 heading；未執行 build 或測試。
 - 未解決事項：場景大型岩壁等既有環境模型外觀不在本次朝向修正範圍。
 
+
+## 2026-11-11：改為多人 3D 火柴人辦公室(階段 1 與協定/Worker)
+
+- 需求：放棄機車遊戲，改做 10 人以內同事連線的 3D 虛擬辦公室，含火柴人、蹲趴、聊天室與漆彈槍。
+- 修改摘要：移除機車遊戲程式、素材與規格；新增 `shared/layout.js`(格局與碰撞資料)、`utils/office/stickman.js`、`composables/usePlayerControls.js`、`components/office/OfficeScene.client.vue`、暱稱入口 `pages/index.vue`；新增 `shared/protocol.js`、`shared/raycast.js`、`worker/index.js`、`worker/Room.js`、`wrangler.toml` 與 Vitest 測試。
+- 驗證結果：dev server 於 Browser pane 確認場景渲染、站/蹲/趴火柴人、窗戶與桌椅，console 無錯誤；api-dev 回報 Vitest 25 通過。
+- 未解決事項：前端尚未連線 Worker、聊天室與漆彈槍 UI 未做；尚未部署；格局為暫時版，待使用者補照片與尺寸；伺服器端未做桌椅碰撞檢查。

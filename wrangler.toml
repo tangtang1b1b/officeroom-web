@@ -1,0 +1,18 @@
+name = "office-paintball"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = ".output/public"
+binding = "ASSETS"
+# /ws 等請求先進 Worker,由 Worker 決定是否交給靜態資源
+run_worker_first = true
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# 免費方案只支援 SQLite 型 Durable Object,因此用 new_sqlite_classes
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

@@ -77,3 +77,10 @@
 - 原因：使用者指出回放中對向卡車像倒車接近。
 - 影響：`RoadScene.client.vue` 對對向車模型額外旋轉 180 度；沿用既有卡車資產與尺度。
 
+
+## 2026-11-11：改做多人 3D 辦公室，部署於 Cloudflare
+
+- 決策：第一人稱視角；被打中只留漆彈斑點；前端 `nuxt generate` 靜態輸出，與 Durable Object 遊戲伺服器同部署於 Cloudflare Worker；不使用 Colyseus，自寫房間邏輯；Durable Object 採一般 WebSocket accept 與 SQLite 型 migration。
+- 原因：10 人規模、需免費且使用者操作最少；伺服器權威判定命中以防作弊。
+- 影響：機車遊戲全部移除；格局資料與射線檢測放 `shared/` 供前後端共用。
+- 取代：2026-11-06 的機車遊戲相關決策。
