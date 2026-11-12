@@ -3,6 +3,7 @@
 export const MAX_PLAYERS = 10
 // 玩家顏色(伺服器依序分配,在線玩家不重複);前端的外型也依序號決定,所以每個人的上衣顏色都不同
 export const PLAYER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
+export const MAX_HP = 100
 export const MAX_NAME_LENGTH = 16
 export const MAX_CHAT_LENGTH = 200
 export const MAX_SEAT_ID_LENGTH = 32
@@ -36,7 +37,7 @@ export const S2C = {
 // paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, part? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
 // correct     { type, pos:[x,y,z], pose }  // 客戶端須同時套用 pose(坐姿時 pos 即座位中心)
 // error       { type, error }  // 含 'room full' | 'seat taken' | 'bad seat' | 'name reserved'(後三者伺服器隨即斷線 1008)
-// Player = { id, name, color, pos, yaw, pitch, pose, seatId }  // seatId 訪客為 null
+// Player = { id, name, color, pos, yaw, pitch, pose, seatId, hp, down }  // seatId 訪客為 null;pos[1] 為跳躍高度;hp 0~MAX_HP;down 為倒地剩餘毫秒(0 = 沒倒地)
 
 export const MAX_PITCH = 1.5
 

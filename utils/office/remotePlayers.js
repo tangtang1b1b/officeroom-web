@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { createStickman } from './stickman.js'
+import { MAX_HP } from '../../shared/protocol.js'
 
 const makeLabel = (name) => {
   const canvas = document.createElement('canvas')
@@ -22,11 +23,42 @@ const makeLabel = (name) => {
   return { sprite, texture, material }
 }
 
+// 頭上的小血條:每次血量變化才重畫。ratio 0~1;downed 時畫成灰底紅框的空條
+const makeBar = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 16
+  const texture = new THREE.CanvasTexture(canvas)
+  const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })
+  const sprite = new THREE.Sprite(material)
+  sprite.scale.set(0.6, 0.075, 1)
+  sprite.renderOrder = 10
+  sprite.visible = false
+  const draw = (ratio, downed) => {
+    const c = canvas.getContext('2d')
+    c.clearRect(0, 0, 128, 16)
+    c.fillStyle = 'rgba(0,0,0,0.65)'
+    c.fillRect(0, 0, 128, 16)
+    if (!downed && ratio > 0) {
+      c.fillStyle = ratio > 0.5 ? '#3ddc84' : ratio > 0.25 ? '#ffc107' : '#ff4d4f'
+      c.fillRect(2, 2, 124 * ratio, 12)
+    }
+    if (downed) {
+      c.strokeStyle = '#ff4d4f'
+      c.lineWidth = 2
+      c.strokeRect(1, 1, 126, 14)
+    }
+    texture.needsUpdate = true
+  }
+  return { sprite, texture, material, draw }
+}
+
 // 離線同事坐在位子上的人偶,id 以此前綴區分(只在前端存在)
 export const IDLE_PREFIX = 'idle:'
 
 const angleDiff =(a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a))
 const LABEL_HEIGHT = { stand: 2.05, crouch: 1.6, prone: 0.7, sit: 1.6 }
+const BAR_OFFSET = 0.22 // 血條在名字上方的距離
 
 // 其他玩家的火柴人:收到快照後朝目標平滑插值
 export const createRemotePlayers = (scene) => {
@@ -39,11 +71,16 @@ export const createRemotePlayers = (scene) => {
     man.group.userData.bodyMeshes = man.meshes // paint.js 依此把漆彈貼到被打中的身體方塊
     label.sprite.position.y = LABEL_HEIGHT.stand
     man.group.add(label.sprite)
+    const bar = makeBar()
+    bar.sprite.position.y = LABEL_HEIGHT.stand + BAR_OFFSET
+    man.group.add(bar.sprite)
     scene.add(man.group)
     const entry = {
       id: info.id,
       man,
       label,
+      bar,
+      barKey: '',
       pose: 'stand',
       target: { x: 0, z: 0, yaw: 0, pitch: 0, pose: 'stand' },
       placed: false,
@@ -59,13 +96,25 @@ export const createRemotePlayers = (scene) => {
     entry.man.dispose()
     entry.label.texture.dispose()
     entry.label.material.dispose()
+    entry.bar.texture.dispose()
+    entry.bar.material.dispose()
     players.delete(id)
   }
 
   const applyState = (info) => {
     const entry = players.get(info.id) || add(info)
     const [x, , z] = info.pos
-    entry.target = { x, z, yaw: info.yaw, pitch: info.pitch ?? 0, pose: info.pose }
+    // 真人才有血條(離線人偶沒有 hp)
+    if (typeof info.hp === 'number') {
+      const downed = (info.down ?? 0) > 0
+      const key = `${info.hp}|${downed}`
+      if (key !== entry.barKey) {
+        entry.barKey = key
+        entry.bar.draw(info.hp / MAX_HP, downed)
+      }
+      entry.bar.sprite.visible = true
+    }
+    entry.target = { y: info.pos[1] || 0, x, z, yaw: info.yaw, pitch: info.pitch ?? 0, pose: info.pose }
     if (!entry.placed) {
       entry.placed = true
       entry.man.group.position.set(x, 0, z)
@@ -75,6 +124,7 @@ export const createRemotePlayers = (scene) => {
       entry.man.setPose(info.pose)
       entry.man.snapPose?.()
       entry.label.sprite.position.y = LABEL_HEIGHT[info.pose] ?? LABEL_HEIGHT.stand
+      entry.bar.sprite.position.y = entry.label.sprite.position.y + BAR_OFFSET
     }
   }
 
@@ -86,11 +136,13 @@ export const createRemotePlayers = (scene) => {
       const dz = entry.target.z - group.position.z
       group.position.x += dx * k
       group.position.z += dz * k
+      group.position.y += ((entry.target.y ?? 0) - group.position.y) * k // 跳躍高度
       group.rotation.y += angleDiff(group.rotation.y, entry.target.yaw) * k
       if (entry.pose !== entry.target.pose) {
         entry.pose = entry.target.pose
         entry.man.setPose(entry.pose)
         entry.label.sprite.position.y = LABEL_HEIGHT[entry.pose]
+        entry.bar.sprite.position.y = LABEL_HEIGHT[entry.pose] + BAR_OFFSET
       }
       entry.man.setLook(entry.target.pitch)
       entry.man.update(dt, dt > 0 ? (Math.hypot(dx, dz) * k) / dt : 0)

@@ -3,6 +3,9 @@ import { moveCircle } from '~/shared/collision.js'
 
 const MOUSE_SENSITIVITY = 0.0035
 const MAX_PITCH = 1.45
+// 跳躍只是垂直位移:碰撞是 2D(俯視圓形 vs 方塊),不看高度,所以跳起來既不會卡進模型,也跳不上桌子
+const JUMP_SPEED = 3.6 // m/s,最高約 0.59m(伺服器上限 0.8)
+const GRAVITY = 11
 
 const isTyping = (target) =>
   target instanceof HTMLElement &&
@@ -19,6 +22,9 @@ export const usePlayerControls = (element) => {
     pitch: 0,
     pose: 'stand',
     speed: 0,
+    y: 0, // 跳躍高度(腳離地)
+    vy: 0,
+    downed: false, // 血量歸零倒地:只能趴著爬,由伺服器通知
   }
   const locked = ref(false)
   const keys = new Set()
@@ -26,7 +32,9 @@ export const usePlayerControls = (element) => {
   const onKeyDown = (event) => {
     if (isTyping(event.target)) return
     keys.add(event.code)
+    if (event.code === 'Space') event.preventDefault() // 避免捲動頁面或觸發聚焦中的按鈕
     if (event.repeat) return
+    if (state.downed) return // 倒地中不能換姿勢或跳
     if (event.code === 'KeyC') state.pose = state.pose === 'crouch' ? 'stand' : 'crouch'
     if (event.code === 'KeyZ') state.pose = state.pose === 'prone' ? 'stand' : 'prone'
   }
@@ -50,6 +58,21 @@ export const usePlayerControls = (element) => {
   document.addEventListener('pointerlockchange', onLockChange)
 
   const update = (dt) => {
+    if (state.downed) state.pose = 'prone'
+    // 跳躍:站著、貼地、按住空白鍵(落地後仍按著會連續跳)
+    if (keys.has('Space') && state.pose === 'stand' && state.y === 0 && !state.downed) state.vy = JUMP_SPEED
+    if (state.vy !== 0 || state.y > 0) {
+      state.vy -= GRAVITY * dt
+      state.y += state.vy * dt
+      if (state.y <= 0) {
+        state.y = 0
+        state.vy = 0
+      }
+    }
+    if (state.pose !== 'stand' && state.y > 0) {
+      state.y = 0
+      state.vy = 0
+    }
     let forward = 0
     let strafe = 0
     if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1

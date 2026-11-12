@@ -5,7 +5,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { SPAWN_POINTS, COLLIDERS, SEATS, seatById, seatSpot } from '../shared/layout.js'
 import { standUpSpot } from '../shared/collision.js'
-import { MAX_PLAYERS, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
+import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
 import {
   checkAdmission,
@@ -26,6 +26,13 @@ import {
   isShootOriginValid,
   spawnYaw,
   pickSpawnPoint,
+  applyHit,
+  reviveIfReady,
+  isDowned,
+  downRemaining,
+  sanitizeJumpY,
+  limitAirTime,
+  DOWN_RECONNECT_KEEP_MS,
 } from './rules.js'
 
 const COLORS = PLAYER_COLORS
@@ -42,6 +49,15 @@ export class Room extends DurableObject {
     this.nextId = 1
     this.timer = null
     this.idleTimer = null
+    this.downRecords = new Map() // recordKey -> { hp, downedUntil }
+  }
+
+  // 取出(並刪除)重連者先前的倒地紀錄;過期的不還原
+  takeDownRecord(key) {
+    const rec = this.downRecords.get(key)
+    this.downRecords.delete(key)
+    if (!rec || rec.downedUntil <= Date.now()) return {}
+    return rec
   }
 
   async fetch(request) {
@@ -145,14 +161,19 @@ export class Room extends DurableObject {
       pose: 'stand',
       seatId: seat ? seat.id : null,
       move: createMoveBucket(now),
+      hp: MAX_HP,
+      downedUntil: 0,
+      airSince: 0,
+      ...this.takeDownRecord(seat ? `seat:${seat.id}` : `guest:${session.ip}:${msg.name}`),
     })
+    session.recordKey = seat ? `seat:${seat.id}` : `guest:${session.ip}:${msg.name}`
     clearTimeout(session.joinTimer)
     this.players.set(session.id, session)
     this.send(session.ws, {
       type: S2C.WELCOME,
       id: session.id,
-      you: { pos: session.pos, yaw: session.yaw, pose: session.pose, seatId: session.seatId },
-      players: [...this.players.values()].map(publicPlayer),
+      you: { pos: session.pos, yaw: session.yaw, pose: session.pose, seatId: session.seatId, hp: session.hp },
+      players: [...this.players.values()].map((q) => publicPlayer(q)),
     })
     this.broadcast({ type: S2C.PLAYER_JOIN, player: publicPlayer(session) }, session.id)
     this.startTimer()
@@ -172,7 +193,7 @@ export class Room extends DurableObject {
     if (!rateAllow(p.stateLimiter, now, STATE_MAX_PER_SEC)) return
     const r = evaluateStateChange(p, msg, now)
     p.lastStateAt = now
-    p.pos = r.pos
+    p.pos = [r.pos[0], limitAirTime(p, sanitizeJumpY(msg.pos[1], r.pose, isDowned(p, now)), now), r.pos[2]]
     if (r.correct && now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
       p.lastCorrect = now
       this.send(p.ws, { type: S2C.CORRECT, pos: p.pos, pose: r.pose })
@@ -194,6 +215,7 @@ export class Room extends DurableObject {
 
   onShoot(p, msg, now) {
     if (!cooldownReady(p, 'lastShoot', now, SHOOT_COOLDOWN_MS)) return
+    if (isDowned(p, now)) return // 倒地不能射擊
     if (!isShootOriginValid(msg.origin, p.pos)) return
     // 坐著的人身體在椅子碰撞盒內:射線不被自己那張椅子擋住,否則坐下就等於無敵
     const seatedChairs = new Set(
@@ -228,6 +250,10 @@ export class Room extends DurableObject {
     paint.targetId = hit.targetId
     if (hit.part) paint.part = hit.part
     this.broadcast(paint)
+    // 真人才有血量(離線人偶只會被噴漆);倒地中被打不扣血、不影響復活時間
+    const target = this.players.get(hit.targetId)
+    // 倒地狀態由快照(hp/down)通知,不送 CORRECT,避免把畫面拉回落後的伺服器位置
+    if (target) applyHit(target, now)
   }
 
   drop(session, code, reason) {
@@ -240,6 +266,10 @@ export class Room extends DurableObject {
   onLeave(session) {
     clearTimeout(session.joinTimer)
     this.sessions.delete(session)
+    // 倒地中離開:記下狀態,短時間內重連要延續倒地,不能靠重連回滿血
+    if (session.joined && session.downedUntil > Date.now()) {
+      this.downRecords.set(session.recordKey, { hp: session.hp, downedUntil: session.downedUntil })
+    }
     if (!this.players.delete(session.id)) return
     this.broadcast({ type: S2C.PLAYER_LEAVE, id: session.id })
     try {
@@ -261,9 +291,11 @@ export class Room extends DurableObject {
     }
     if (this.timer) return
     this.timer = setInterval(() => {
+      const now = Date.now()
+      for (const p of this.players.values()) reviveIfReady(p, now)
       this.broadcast({
         type: S2C.SNAPSHOT,
-        players: [...this.players.values()].map(publicPlayer),
+        players: [...this.players.values()].map((p) => publicPlayer(p, now)),
       })
     }, BROADCAST_MS)
   }
@@ -292,6 +324,17 @@ export class Room extends DurableObject {
   }
 }
 
-function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color, pos: p.pos, yaw: p.yaw, pitch: p.pitch, pose: p.pose, seatId: p.seatId ?? null }
+function publicPlayer(p, now = Date.now()) {
+  return {
+    id: p.id,
+    name: p.name,
+    color: p.color,
+    pos: p.pos,
+    yaw: p.yaw,
+    pitch: p.pitch,
+    pose: p.pose,
+    seatId: p.seatId ?? null,
+    hp: p.hp,
+    down: downRemaining(p, now),
+  }
 }

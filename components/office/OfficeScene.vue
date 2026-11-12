@@ -1,7 +1,7 @@
 <script setup>
 import * as THREE from 'three'
 import { createRemotePlayers, IDLE_PREFIX } from '~/utils/office/remotePlayers.js'
-import { PLAYER_COLORS, MAX_PLAYERS } from '~/shared/protocol.js'
+import { PLAYER_COLORS, MAX_PLAYERS, MAX_HP } from '~/shared/protocol.js'
 import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
@@ -21,6 +21,19 @@ const hovering = ref(false) // 游標是否正指著別的玩家
 const cursor = ref({ x: 0, y: 0 })
 const poseLabel = ref('站立')
 const hitFlash = ref({ key: 0, color: '#ffffff' })
+const hp = ref(MAX_HP)
+const downSec = ref(0) // 倒地剩餘秒數(0 = 沒倒地)
+const hpColor = computed(() => (hp.value > MAX_HP * 0.5 ? '#3ddc84' : hp.value > MAX_HP * 0.25 ? '#ffc107' : '#ff4d4f'))
+// 伺服器通知自己的血量與倒地狀態(welcome 與每次快照)
+const applySelf = (player) => {
+  if (typeof player.hp !== 'number') return
+  hp.value = player.hp
+  const down = player.down ?? 0
+  downSec.value = Math.ceil(down / 1000)
+  const downed = down > 0
+  if (downed && !controls.state.downed) controls.state.pose = 'prone'
+  controls.state.downed = downed
+}
 const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下', sit: '坐著' }
 const STATUS_TEXT = {
   seat_taken: '這個座位已有人上線,請按右上角「登出」後改選別的名字',
@@ -467,7 +480,7 @@ const syncIdleSeats = () => {
 }
 
 const shoot = () => {
-  if (!hoverHit) return
+  if (!hoverHit || controls.state.downed) return
   const { state } = controls
   // 起點用姿勢對應的標準眼高(伺服器以此驗證),方向指向游標點到的位置
   const origin = new THREE.Vector3(state.x, PLAYER.eyeHeight[state.pose], state.z)
@@ -486,14 +499,14 @@ const tick = () => {
 
   const { state } = controls
   eyeHeight += (PLAYER.eyeHeight[state.pose] - eyeHeight) * (1 - Math.exp(-14 * dt))
-  camera.position.set(state.x, eyeHeight, state.z)
+  camera.position.set(state.x, eyeHeight + state.y, state.z)
   camera.rotation.set(state.pitch, state.yaw, 0, 'YXZ')
   poseLabel.value = POSE_LABELS[state.pose]
 
   sendTimer += dt
   if (sendTimer >= SEND_INTERVAL) {
     sendTimer = 0
-    network.sendState([state.x, 0, state.z], state.yaw, state.pitch, state.pose)
+    network.sendState([state.x, state.y, state.z], state.yaw, state.pitch, state.pose)
   }
 
   updateHover()
@@ -601,6 +614,7 @@ onMounted(() => {
       }
       // 重連或伺服器重啟後 id 可能重新編號,先清掉舊的遠端玩家再重建
       remotes.dispose()
+      if (msg.you) applySelf({ hp: msg.you.hp, down: 0 })
       for (const player of msg.players || []) {
         if (player.id !== store.myId && player.pos) remotes.applyState(player)
       }
@@ -620,6 +634,7 @@ onMounted(() => {
     snapshot: (players) => {
       const present = new Set()
       for (const player of players) {
+        if (player.id === store.myId) applySelf(player)
         if (player.id === store.myId || !player.pos) continue
         present.add(player.id)
         remotes.applyState(player)
@@ -718,6 +733,15 @@ onBeforeUnmount(() => {
       <template v-else>🎯 漆彈對戰 · 線上 {{ store.roster.length }}/{{ MAX_PLAYERS }} · {{ poseLabel }}</template>
     </p>
 
+    <!-- 左上下方:自己的血量;倒地時顯示復活倒數 -->
+    <div class="pointer-events-none absolute left-4 top-20 w-40 rounded-xl bg-white/90 px-3 py-2 text-xs text-neutral-700 shadow">
+      <div class="mb-1 flex justify-between"><span>❤ 血量</span><b>{{ hp }}</b></div>
+      <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
+        <div class="h-full rounded-full transition-all" :style="{ width: (hp / MAX_HP) * 100 + '%', background: hpColor }"></div>
+      </div>
+      <p v-if="downSec > 0" class="mt-1 font-bold text-red-600">倒地中,只能爬行 · {{ downSec }} 秒後可起身</p>
+    </div>
+
     <!-- 右上:連線、人數、暱稱、登出 -->
     <div class="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-white/90 py-1.5 pl-4 pr-1.5 text-sm text-neutral-700 shadow">
       <span class="flex items-center gap-1.5">
@@ -743,7 +767,7 @@ onBeforeUnmount(() => {
     <!-- 下方:操作提示 -->
     <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 text-xs text-neutral-700">
       <p class="pointer-events-none rounded-full bg-white/90 px-4 py-2 shadow">
-        🎯 準心對準同事並點擊開槍(按住連射) · 點畫面鎖定滑鼠 · WASD 移動 · C 蹲 · Z 趴 · Enter 開啟聊天並使用滑鼠
+        🎯 準心對準同事並點擊開槍(按住連射) · 點畫面鎖定滑鼠 · WASD 移動 · 空白鍵跳 · C 蹲 · Z 趴 · Enter 開啟聊天並使用滑鼠
       </p>
       <button class="rounded-full bg-yellow-400 px-5 py-2 text-sm font-bold text-black shadow-lg ring-2 ring-white hover:bg-yellow-300" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
         ⏎ Enter 聊天
