@@ -9,8 +9,9 @@ const WHITE = 0xf4f7ff
 const RED = 0xff5a5a
 const DARK = 0x1a1a22
 
-const ROW_RADIUS = 0.95 // 第 0 排離人的距離
-const ROW_GAP = 0.45 // 每往外一排多出的距離
+const ROW_RADIUS = 0.45 // 第 0 排離人的距離(背後靈:幾乎貼著背)
+const ROW_GAP = 0.22 // 每往外一排多出的距離
+const ANGLE_SQUEEZE = 0.6 // 扇形收窄,才會擠在背後而不是飄到身側
 const BOB = 0.13 // 上下飄動的幅度(公尺)
 
 export const createGhosts = (scene) => {
@@ -118,17 +119,17 @@ export const createGhosts = (scene) => {
           const { row } = fanSlot(i)
           const yaw = anchor.yaw ?? 0
           // 身後方向 = (sin yaw, cos yaw);再往左 / 右轉 angle 度
-          const a = (fanAngle(i, n) * Math.PI) / 180
+          const a = (fanAngle(i, n) * ANGLE_SQUEEZE * Math.PI) / 180
           const bx = Math.sin(yaw)
           const bz = Math.cos(yaw)
           const dx = bx * Math.cos(a) - bz * Math.sin(a)
           const dz = bx * Math.sin(a) + bz * Math.cos(a)
           // 越大隻離遠一點,才不會擠在一起
-          const radius = (ROW_RADIUS + row * ROW_GAP) * (1 + 0.35 * (swarm.maxScale - 1))
+          const radius = (ROW_RADIUS + row * ROW_GAP) * (1 + 0.2 * (swarm.maxScale - 1))
           const tx = anchor.x + dx * radius
           const tz = anchor.z + dz * radius
           // 高度:大約在肩膀到頭的高度,往外的排稍微高一點;只有上下飄動
-          const ty = anchor.y + (anchor.height ?? 1.75) * 0.55 + row * 0.12 + 0.1 * g.scale + BOB * Math.sin(time * 1.6 + g.seed)
+          const ty = anchor.y + (anchor.height ?? 1.75) * 0.6 + row * 0.15 + 0.1 * g.scale + BOB * Math.sin(time * 1.6 + g.seed)
           g.group.scale.setScalar(g.scale)
           g.group.rotation.y = yaw // 臉朝角色(跟角色面向同一方向)
           if (!g.placed) {
