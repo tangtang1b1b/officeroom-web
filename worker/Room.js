@@ -4,9 +4,10 @@
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
 import { SPAWN_POINTS, COLLIDERS, SEATS, seatById, seatSpot } from '../shared/layout.js'
-import { standUpSpot } from '../shared/collision.js'
+import { standUpSpot, groundHeight } from '../shared/collision.js'
 import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
+import { createDog, stepDog, publicDog } from './dog.js'
 import {
   checkAdmission,
   isIdle,
@@ -31,6 +32,7 @@ import {
   isDowned,
   downRemaining,
   sanitizeJumpY,
+  clampClaimY,
   limitAirTime,
   DOWN_RECONNECT_KEEP_MS,
 } from './rules.js'
@@ -50,6 +52,8 @@ export class Room extends DurableObject {
     this.timer = null
     this.idleTimer = null
     this.downRecords = new Map() // recordKey -> { hp, downedUntil }
+    this.dog = createDog(Date.now())
+    this.dogAt = Date.now()
   }
 
   // 取出(並刪除)重連者先前的倒地紀錄;過期的不還原
@@ -174,6 +178,7 @@ export class Room extends DurableObject {
       id: session.id,
       you: { pos: session.pos, yaw: session.yaw, pose: session.pose, seatId: session.seatId, hp: session.hp },
       players: [...this.players.values()].map((q) => publicPlayer(q)),
+      dog: publicDog(this.dog),
     })
     this.broadcast({ type: S2C.PLAYER_JOIN, player: publicPlayer(session) }, session.id)
     this.startTimer()
@@ -191,9 +196,15 @@ export class Room extends DurableObject {
 
   onState(p, msg, now) {
     if (!rateAllow(p.stateLimiter, now, STATE_MAX_PER_SEC)) return
-    const r = evaluateStateChange(p, msg, now)
+    const prevY = p.pos[1] || 0
+    const claimY = clampClaimY(msg.pos[1])
+    // 碰撞以客戶端回報的腳底高度判定(跳到桌面上就不被桌子擋);回報值已夾在合理範圍
+    const r = evaluateStateChange(p, { ...msg, pos: [msg.pos[0], claimY, msg.pos[2]] }, now)
     p.lastStateAt = now
-    p.pos = [r.pos[0], limitAirTime(p, sanitizeJumpY(msg.pos[1], r.pose, isDowned(p, now)), now), r.pos[2]]
+    // 腳下支撐面(地板或桌 / 沙發頂面)決定高度的下限與跳躍上限,再套滯空時間限制
+    const ground = groundHeight(r.pos[0], r.pos[2], prevY)
+    const y = limitAirTime(p, sanitizeJumpY(claimY, r.pose, isDowned(p, now), ground), now, ground)
+    p.pos = [r.pos[0], y, r.pos[2]]
     if (r.correct && now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
       p.lastCorrect = now
       this.send(p.ws, { type: S2C.CORRECT, pos: p.pos, pose: r.pose })
@@ -293,9 +304,12 @@ export class Room extends DurableObject {
     this.timer = setInterval(() => {
       const now = Date.now()
       for (const p of this.players.values()) reviveIfReady(p, now)
+      stepDog(this.dog, now, Math.min(now - this.dogAt, 200))
+      this.dogAt = now
       this.broadcast({
         type: S2C.SNAPSHOT,
         players: [...this.players.values()].map((p) => publicPlayer(p, now)),
+        dog: publicDog(this.dog),
       })
     }, BROADCAST_MS)
   }
@@ -303,6 +317,7 @@ export class Room extends DurableObject {
   stopTimer() {
     clearInterval(this.timer)
     this.timer = null
+    this.dogAt = Date.now() // 沒人時狗暫停,下次有人再從現在開始算
     clearInterval(this.idleTimer)
     this.idleTimer = null
   }

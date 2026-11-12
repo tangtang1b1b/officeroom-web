@@ -8,6 +8,7 @@ export const MOVE_BUDGET_CAP = 2.0 // 公尺;約 0.6 秒的行走距離,容許�
 export const COLLISION_RADIUS_TOLERANCE = 0.01
 export const MAX_SHOOT_ORIGIN_HORIZ = 1.5 // 伺服器位置會落後客戶端
 export const SHOOT_ORIGIN_Y_MARGIN = 0.1
+export const SHOOT_ORIGIN_AIR_LAG = 0.6 // 跳躍中伺服器記錄的高度會落後客戶端
 export const SIT_MAX_PLAYER_DIST = 1.5 // 坐下時玩家距座位中心上限
 export const SIT_MAX_CLIENT_DIST = 0.1 // 客戶端回報的坐下位置與座位中心的容許誤差
 export const SHOOT_COOLDOWN_MS = 150
@@ -25,8 +26,9 @@ export const IDLE_TIMEOUT_MS = 60_000
 // ---- 血量 / 倒地 / 跳躍 ----
 export const HIT_DAMAGE = 20 // 被打中一次扣的血(MAX_HP 100 → 5 發倒地)
 export const DOWN_DURATION_MS = 10_000 // 倒地(只能趴著爬)到復活的時間
-export const JUMP_MAX_Y = 0.8 // 伺服器接受的跳躍高度上限(公尺)
-export const JUMP_MAX_AIR_MS = 900 // 連續離地超過這個時間就強制落地(正常跳躍約 0.65 秒)
+export const JUMP_REACH = 1.15 // 腳底最多離「腳下支撐面」這麼高(客戶端跳躍頂點 1.0m + 容許)
+export const CLAIM_MAX_Y = 1.9 // 客戶端回報的腳底高度上限(站在 0.8m 的沙發上再跳 1.0m)
+export const JUMP_MAX_AIR_MS = 1300 // 連續離地超過這個時間就強制落地(從桌上跳到地上約 1 秒)
 export const DOWN_RECONNECT_KEEP_MS = DOWN_DURATION_MS // 倒地者斷線後保留狀態的時間,防止重連回滿血
 
 // 倒地中:只能趴著移動,不能射擊,再被打不扣血也不延長時間
@@ -53,24 +55,27 @@ export function reviveIfReady(player, now) {
 
 export const downRemaining = (player, now) => Math.max(0, (player.downedUntil ?? 0) - now)
 
-// 滯空時間限制:連續 y>0 超過 JUMP_MAX_AIR_MS 就貼地,要先落地(y=0)才能再跳。
+// 滯空時間限制:腳離開支撐面(ground)連續超過 JUMP_MAX_AIR_MS 就強制貼回支撐面,要先落地才能再離地。
 // player 需有 airSince(離地開始時間,0 = 貼地)。回傳可採用的高度。
-export function limitAirTime(player, y, now) {
-  if (y <= 0) {
+export function limitAirTime(player, y, now, ground = 0) {
+  if (y <= ground + 0.01) {
     player.airSince = 0
-    return 0
+    return ground
   }
   if (!player.airSince) player.airSince = now
-  if (now - player.airSince > JUMP_MAX_AIR_MS) return 0 // 超時:算貼地,但 airSince 保留,直到真的送出 y=0
+  if (now - player.airSince > JUMP_MAX_AIR_MS) return ground // 超時:算貼地,但 airSince 保留,直到真的落地
   return y
 }
 
-// 站著才能跳;其他姿勢與倒地一律貼地。回傳夾在 [0, JUMP_MAX_Y] 的高度。
-export function sanitizeJumpY(y, pose, downed) {
-  if (pose !== 'stand' || downed) return 0
-  if (!Number.isFinite(y)) return 0
-  return Math.min(JUMP_MAX_Y, Math.max(0, y))
+// 站著才能離地;其他姿勢與倒地一律貼在支撐面(ground,例如桌面)上。回傳夾在 [ground, ground + JUMP_REACH] 的高度。
+export function sanitizeJumpY(y, pose, downed, ground = 0) {
+  if (pose !== 'stand' || downed) return ground
+  if (!Number.isFinite(y)) return ground
+  return Math.min(ground + JUMP_REACH, Math.max(ground, y))
 }
+
+// 客戶端回報的高度先夾在合理範圍,拿去做碰撞判定
+export const clampClaimY = (y) => (Number.isFinite(y) ? Math.min(CLAIM_MAX_Y, Math.max(0, y)) : 0)
 
 // 閒置:超過 timeout 沒收到任何訊息
 export function isIdle(lastMessageAt, now, timeoutMs = IDLE_TIMEOUT_MS) {
@@ -130,7 +135,7 @@ export function evaluateMove(player, newPos, now) {
 
   const dist = Math.hypot(newPos[0] - player.pos[0], newPos[2] - player.pos[2])
   if (dist > bucket.budget) return { ok: false, reason: 'speed' }
-  if (isBlocked(newPos[0], newPos[2], PLAYER.radius - COLLISION_RADIUS_TOLERANCE)) {
+  if (isBlocked(newPos[0], newPos[2], PLAYER.radius - COLLISION_RADIUS_TOLERANCE, newPos[1] || 0)) {
     return { ok: false, reason: 'blocked' }
   }
   bucket.budget -= dist
@@ -198,8 +203,10 @@ const insideBox = (p, box) =>
 // pos: 伺服器記錄的玩家位置 [x,_,z]。水平距離寬鬆,y 限制在趴/站眼高範圍內。
 export function isShootOriginValid(origin, pos) {
   if (Math.hypot(origin[0] - pos[0], origin[2] - pos[2]) > MAX_SHOOT_ORIGIN_HORIZ) return false
-  const yMin = PLAYER.eyeHeight.prone - SHOOT_ORIGIN_Y_MARGIN
-  const yMax = PLAYER.eyeHeight.stand + SHOOT_ORIGIN_Y_MARGIN
+  const base = pos[1] || 0 // 站在桌上 / 跳起來時,眼睛高度要加上腳底高度
+  const lag = base > 0 ? SHOOT_ORIGIN_AIR_LAG : 0 // 貼地時維持嚴格;離地 / 在桌上時容許高度落後
+  const yMin = base + PLAYER.eyeHeight.prone - SHOOT_ORIGIN_Y_MARGIN - lag
+  const yMax = base + PLAYER.eyeHeight.stand + SHOOT_ORIGIN_Y_MARGIN + lag
   if (origin[1] < yMin || origin[1] > yMax) return false
   if (origin[0] < ROOM.minX || origin[0] > ROOM.maxX) return false
   if (origin[1] < 0 || origin[1] > ROOM.height) return false

@@ -252,11 +252,14 @@ export const monitorOf = (desk) => ({
   y: MONITOR.y,
 })
 
-const box = (id, x, z, w, d, minY, maxY) => ({
+// standable:可以站在頂面上(桌子、沙發);椅子、櫃子、牆、桌上的隔板與螢幕都不行
+const box = (id, x, z, w, d, minY, maxY, standable = false) => ({
   id,
   min: [x - w / 2, minY, z - d / 2],
   max: [x + w / 2, maxY, z + d / 2],
+  standable,
 })
+const STANDABLE_KINDS = new Set(['table', 'roundtable', 'loungechair'])
 
 // 所有實心碰撞方塊;外牆以 ROOM 邊界處理。渲染看得到的東西都要在這裡。
 export const COLLIDERS = [
@@ -264,14 +267,14 @@ export const COLLIDERS = [
   box(DOOR_LEAF.id, DOOR_LEAF.x, DOOR_LEAF.z, DOOR_LEAF.w, DOOR_LEAF.d, 0, DOOR_LEAF.h),
   ...FIXTURES.map((f) => {
     const fp = footprint(f, f.w, f.d)
-    return box(f.id, f.x, f.z, fp.w, fp.d, 0, f.h)
+    return box(f.id, f.x, f.z, fp.w, fp.d, 0, f.h, STANDABLE_KINDS.has(f.kind))
   }),
   ...DESKS.flatMap((desk) => {
     const fp = footprint(desk, desk.w, desk.d)
     const part = partitionOf(desk)
     const mon = monitorOf(desk)
     return [
-      box(desk.id, desk.x, desk.z, fp.w, fp.d, 0, desk.h),
+      box(desk.id, desk.x, desk.z, fp.w, fp.d, 0, desk.h, true),
       box(`${desk.id}-partition`, part.x, part.z, part.w, part.d, desk.h, desk.h + part.h),
       box(`${desk.id}-monitor`, mon.x, mon.z, mon.w, mon.d, desk.h + mon.y - mon.h / 2, desk.h + mon.y + mon.h / 2),
     ]

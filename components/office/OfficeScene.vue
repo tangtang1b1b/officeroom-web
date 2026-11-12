@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { createRemotePlayers, IDLE_PREFIX } from '~/utils/office/remotePlayers.js'
 import { PLAYER_COLORS, MAX_PLAYERS, MAX_HP } from '~/shared/protocol.js'
 import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
+import { createDog } from '~/utils/office/dog.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
 import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF, SEATS, seatSpot } from '~/shared/layout.js'
@@ -57,6 +58,7 @@ let camera
 let controls
 let network
 let remotes
+let dog
 let paint
 let gun
 let recoil = 0
@@ -482,8 +484,8 @@ const syncIdleSeats = () => {
 const shoot = () => {
   if (!hoverHit || controls.state.downed) return
   const { state } = controls
-  // 起點用姿勢對應的標準眼高(伺服器以此驗證),方向指向游標點到的位置
-  const origin = new THREE.Vector3(state.x, PLAYER.eyeHeight[state.pose], state.z)
+  // 起點用姿勢對應的標準眼高加上腳底高度(跳起來 / 站在桌上;伺服器以此驗證),方向指向游標點到的位置
+  const origin = new THREE.Vector3(state.x, state.y + PLAYER.eyeHeight[state.pose], state.z)
   const dir = hoverHit.point.clone().sub(origin)
   if (dir.lengthSq() < 1e-6) return
   dir.normalize()
@@ -520,6 +522,7 @@ const tick = () => {
   gun.rotation.x = recoil * 0.12
 
   remotes.update(dt)
+  dog?.update(dt)
   paint.update(dt)
   renderer.render(scene, camera)
 }
@@ -585,6 +588,8 @@ onMounted(() => {
   buildViewmodel()
 
   remotes = createRemotePlayers(scene)
+  dog = createDog(scene)
+  disposables.push({ dispose: () => dog.dispose() })
   // 斑點附著的宿主:被打中的玩家
   paint = createPaint(scene, (msg) => {
     if (msg.targetId) return remotes.getGroup(msg.targetId)
@@ -592,7 +597,7 @@ onMounted(() => {
   })
 
   controls = usePlayerControls(renderer.domElement)
-  if (import.meta.dev) window.__office = { controls, remotes }
+  if (import.meta.dev) window.__office = { controls, remotes, get dog() { return dog } }
   disposables.push({ dispose: watch(controls.locked, (value) => (locked.value = value)) })
   renderer.domElement.addEventListener('mousedown', onCanvasDown)
   window.addEventListener('mousemove', onMouseMove)
@@ -614,6 +619,7 @@ onMounted(() => {
       }
       // 重連或伺服器重啟後 id 可能重新編號,先清掉舊的遠端玩家再重建
       remotes.dispose()
+      dog.apply(msg.dog)
       if (msg.you) applySelf({ hp: msg.you.hp, down: 0 })
       for (const player of msg.players || []) {
         if (player.id !== store.myId && player.pos) remotes.applyState(player)
@@ -631,7 +637,8 @@ onMounted(() => {
       remotes.remove(id)
       syncIdleSeats()
     },
-    snapshot: (players) => {
+    snapshot: (players, dogState) => {
+      dog.apply(dogState)
       const present = new Set()
       for (const player of players) {
         if (player.id === store.myId) applySelf(player)

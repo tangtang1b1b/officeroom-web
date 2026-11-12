@@ -31,7 +31,7 @@ const makeBar = () => {
   const texture = new THREE.CanvasTexture(canvas)
   const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })
   const sprite = new THREE.Sprite(material)
-  sprite.scale.set(0.6, 0.075, 1)
+  sprite.scale.set(0.9, 0.12, 1)
   sprite.renderOrder = 10
   sprite.visible = false
   const draw = (ratio, downed) => {
@@ -58,7 +58,7 @@ export const IDLE_PREFIX = 'idle:'
 
 const angleDiff =(a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a))
 const LABEL_HEIGHT = { stand: 2.05, crouch: 1.6, prone: 0.7, sit: 1.6 }
-const BAR_OFFSET = 0.22 // 血條在名字上方的距離
+const BAR_OFFSET = 0.26 // 血條在名字上方的距離
 
 // 其他玩家的火柴人:收到快照後朝目標平滑插值
 export const createRemotePlayers = (scene) => {

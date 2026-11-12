@@ -66,7 +66,7 @@ export const useNetwork = (handlers = {}) => {
         break
       }
       case S2C.SNAPSHOT:
-        handlers.snapshot?.(msg.players || [])
+        handlers.snapshot?.(msg.players || [], msg.dog)
         break
       case S2C.CHAT:
         store.pushChat(msg.from, msg.text)

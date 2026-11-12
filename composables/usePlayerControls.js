@@ -1,11 +1,14 @@
-import { PLAYER, SPAWN_POINTS } from '~/shared/layout.js'
-import { moveCircle } from '~/shared/collision.js'
+import { PLAYER, ROOM, SPAWN_POINTS } from '~/shared/layout.js'
+import { moveCircle, groundHeight } from '~/shared/collision.js'
 
 const MOUSE_SENSITIVITY = 0.0035
 const MAX_PITCH = 1.45
-// 跳躍只是垂直位移:碰撞是 2D(俯視圓形 vs 方塊),不看高度,所以跳起來既不會卡進模型,也跳不上桌子
-const JUMP_SPEED = 3.6 // m/s,最高約 0.59m(伺服器上限 0.8)
+// 跳躍:腳底高度 y。碰撞只擋「高度範圍與身體重疊」的方塊(shared/collision.js):
+// 桌子(0.75m)與沙發(0.8m)頂面可以站上去,椅子、櫃子、牆、桌上的隔板與螢幕不行。
+const JUMP_SPEED = 4.7 // m/s,最高約 1.0m(伺服器容許到 1.15m)
 const GRAVITY = 11
+const EPS = 1e-3
+const MAX_FEET_Y = ROOM.height - PLAYER.bodyHeight.stand // 頭不能穿過天花板
 
 const isTyping = (target) =>
   target instanceof HTMLElement &&
@@ -59,19 +62,28 @@ export const usePlayerControls = (element) => {
 
   const update = (dt) => {
     if (state.downed) state.pose = 'prone'
-    // 跳躍:站著、貼地、按住空白鍵(落地後仍按著會連續跳)
-    if (keys.has('Space') && state.pose === 'stand' && state.y === 0 && !state.downed) state.vy = JUMP_SPEED
-    if (state.vy !== 0 || state.y > 0) {
+    // 腳下的支撐面(地板或桌 / 沙發頂面)
+    let ground = groundHeight(state.x, state.z, state.y)
+    const grounded = state.y <= ground + EPS && state.vy <= 0
+    if (grounded) {
+      state.y = ground
+      state.vy = 0
+      // 站著、貼著支撐面、按住空白鍵:起跳(落地後仍按著會連續跳)
+      if (keys.has('Space') && state.pose === 'stand' && !state.downed) state.vy = JUMP_SPEED
+    }
+    if (state.vy !== 0 || state.y > ground + EPS) {
+      const prevY = state.y
       state.vy -= GRAVITY * dt
       state.y += state.vy * dt
-      if (state.y <= 0) {
-        state.y = 0
+      ground = groundHeight(state.x, state.z, prevY)
+      if (state.y <= ground && state.vy <= 0) {
+        state.y = ground // 落在地板或桌 / 沙發頂面上
         state.vy = 0
       }
-    }
-    if (state.pose !== 'stand' && state.y > 0) {
-      state.y = 0
-      state.vy = 0
+      if (state.y > MAX_FEET_Y) {
+        state.y = MAX_FEET_Y
+        state.vy = Math.min(state.vy, 0)
+      }
     }
     let forward = 0
     let strafe = 0
@@ -91,7 +103,7 @@ export const usePlayerControls = (element) => {
     const dx = ((-sin * forward + cos * strafe) / length) * speed * dt
     const dz = ((-cos * forward - sin * strafe) / length) * speed * dt
     // 圓形碰撞:被擋時沿障礙物表面滑動(含斜牆與方塊轉角)
-    const next = moveCircle(state.x, state.z, dx, dz)
+    const next = moveCircle(state.x, state.z, dx, dz, PLAYER.radius, state.y)
     state.x = next.x
     state.z = next.z
     state.speed = speed
