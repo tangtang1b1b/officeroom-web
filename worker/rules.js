@@ -1,6 +1,6 @@
 // 伺服器規則的純函式(不依賴 Durable Object,方便單元測試)。時間單位:毫秒。
 import { ROOM, PLAYER, COLLIDERS, SEATS, seatSpot } from '../shared/layout.js'
-import { isBlocked } from '../shared/collision.js'
+import { isBlocked, groundHeight } from '../shared/collision.js'
 import { MAX_HP } from '../shared/protocol.js'
 
 export const MOVE_SPEED_FACTOR = 1.3
@@ -27,7 +27,7 @@ export const IDLE_TIMEOUT_MS = 60_000
 export const HIT_DAMAGE = 20 // 被打中一次扣的血(MAX_HP 100 → 5 發倒地)
 export const DOWN_DURATION_MS = 10_000 // 倒地(只能趴著爬)到復活的時間
 export const JUMP_REACH = 1.15 // 腳底最多離「腳下支撐面」這麼高(客戶端跳躍頂點 1.0m + 容許)
-export const CLAIM_MAX_Y = 1.9 // 客戶端回報的腳底高度上限(站在 0.8m 的沙發上再跳 1.0m)
+export const CLAIM_MAX_Y = ROOM.height - PLAYER.bodyHeight.stand + 0.05 // 客戶端回報的腳底高度上限:頭不能穿過天花板(與客戶端 MAX_FEET_Y 一致)
 export const JUMP_MAX_AIR_MS = 1300 // 連續離地超過這個時間就強制落地(從桌上跳到地上約 1 秒)
 export const DOWN_RECONNECT_KEEP_MS = DOWN_DURATION_MS // 倒地者斷線後保留狀態的時間,防止重連回滿血
 
@@ -74,7 +74,7 @@ export function sanitizeJumpY(y, pose, downed, ground = 0) {
   return Math.min(ground + JUMP_REACH, Math.max(ground, y))
 }
 
-// 客戶端回報的高度先夾在合理範圍,拿去做碰撞判定
+// 客戶端回報的高度先夾在合理範圍
 export const clampClaimY = (y) => (Number.isFinite(y) ? Math.min(CLAIM_MAX_Y, Math.max(0, y)) : 0)
 
 // 閒置:超過 timeout 沒收到任何訊息
@@ -142,6 +142,20 @@ export function evaluateMove(player, newPos, now) {
   return { ok: true, pos: [newPos[0], 0, newPos[2]], cost: dist }
 }
 
+// 伺服器採用的腳底高度:先算新位置腳下的支撐面(參考高度取「上次記錄」與「回報值,最多比上次高一個跳躍」的較大者,
+// 這樣被強制落地後仍能正確站回桌面),再依姿勢 / 倒地 / 滯空時間得到高度。
+// 碰撞判定用這個高度,而不是客戶端回報的原始值,避免用假高度穿過家具。
+export function evaluateHeight(player, msg, now) {
+  const prevY = player.pos[1] || 0
+  const claimY = clampClaimY(msg.pos[1])
+  const downed = isDowned(player, now)
+  const pose = downed ? 'prone' : msg.pose
+  const ref = Math.max(prevY, Math.min(claimY, prevY + JUMP_REACH))
+  const ground = groundHeight(msg.pos[0], msg.pos[2], ref)
+  const y = limitAirTime(player, sanitizeJumpY(claimY, pose, downed, ground), now, ground)
+  return { y, ground, prevY }
+}
+
 // 訪客名稱是否與座位表的員工名衝突(不分大小寫)
 export function isNameReserved(name) {
   const n = String(name).toLowerCase()
@@ -201,10 +215,10 @@ const insideBox = (p, box) =>
   p[2] >= box.min[2] && p[2] <= box.max[2]
 
 // pos: 伺服器記錄的玩家位置 [x,_,z]。水平距離寬鬆,y 限制在趴/站眼高範圍內。
-export function isShootOriginValid(origin, pos) {
+export function isShootOriginValid(origin, pos, airborne = false) {
   if (Math.hypot(origin[0] - pos[0], origin[2] - pos[2]) > MAX_SHOOT_ORIGIN_HORIZ) return false
   const base = pos[1] || 0 // 站在桌上 / 跳起來時,眼睛高度要加上腳底高度
-  const lag = base > 0 ? SHOOT_ORIGIN_AIR_LAG : 0 // 貼地時維持嚴格;離地 / 在桌上時容許高度落後
+  const lag = base > 0 || airborne ? SHOOT_ORIGIN_AIR_LAG : 0 // 貼地時維持嚴格;離地 / 在桌上 / 剛起跳時容許高度落後
   const yMin = base + PLAYER.eyeHeight.prone - SHOOT_ORIGIN_Y_MARGIN - lag
   const yMax = base + PLAYER.eyeHeight.stand + SHOOT_ORIGIN_Y_MARGIN + lag
   if (origin[1] < yMin || origin[1] > yMax) return false

@@ -85,6 +85,10 @@ export const usePlayerControls = (element) => {
         state.vy = Math.min(state.vy, 0)
       }
     }
+    // 高度每幀都在變:即使沒按方向鍵也要把嵌進方塊的身體推出(例如從桌緣掉下來、從上方落進櫃子)
+    const unstuck = moveCircle(state.x, state.z, 0, 0, PLAYER.radius, state.y)
+    state.x = unstuck.x
+    state.z = unstuck.z
     let forward = 0
     let strafe = 0
     if (keys.has('KeyW') || keys.has('ArrowUp')) forward += 1

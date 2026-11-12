@@ -671,6 +671,9 @@ onMounted(() => {
     correct: (pos, pose) => {
       controls.state.x = pos[0]
       controls.state.z = pos[2]
+      // 高度一併同步,否則會在地面高度被塞進桌子裡
+      controls.state.y = pos[1] || 0
+      controls.state.vy = 0
       if (pose) controls.state.pose = pose // 起身被拒要回到坐姿、坐下被拒要回到站姿
     },
     rejected: () => syncIdleSeats(),
@@ -773,10 +776,10 @@ onBeforeUnmount(() => {
 
     <!-- 下方:操作提示 -->
     <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 text-xs text-neutral-700">
-      <p class="pointer-events-none rounded-full bg-white/90 px-4 py-2 shadow">
-        🎯 準心對準同事並點擊開槍(按住連射) · 點畫面鎖定滑鼠 · WASD 移動 · 空白鍵跳 · C 蹲 · Z 趴 · Enter 開啟聊天並使用滑鼠
+      <p class="pointer-events-none whitespace-nowrap rounded-full bg-white/90 px-4 py-2 shadow">
+        🎯 點擊開槍 · WASD 移動 · 空白 跳 · C 蹲 · Z 趴
       </p>
-      <button class="rounded-full bg-yellow-400 px-5 py-2 text-sm font-bold text-black shadow-lg ring-2 ring-white hover:bg-yellow-300" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
+      <button class="whitespace-nowrap rounded-full bg-yellow-400 px-5 py-2 text-sm font-bold text-black shadow-lg ring-2 ring-white hover:bg-yellow-300" @click="chatBox?.isOpen ? chatBox.close() : chatBox?.open()">
         ⏎ Enter 聊天
       </button>
     </div>

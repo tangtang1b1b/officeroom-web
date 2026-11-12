@@ -4,7 +4,7 @@
 // 規則判斷都在 rules.js(純函式)。
 import { DurableObject } from 'cloudflare:workers'
 import { SPAWN_POINTS, COLLIDERS, SEATS, seatById, seatSpot } from '../shared/layout.js'
-import { standUpSpot, groundHeight } from '../shared/collision.js'
+import { standUpSpot } from '../shared/collision.js'
 import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
 import { createDog, stepDog, publicDog } from './dog.js'
@@ -31,9 +31,7 @@ import {
   reviveIfReady,
   isDowned,
   downRemaining,
-  sanitizeJumpY,
-  clampClaimY,
-  limitAirTime,
+  evaluateHeight,
   DOWN_RECONNECT_KEEP_MS,
 } from './rules.js'
 
@@ -196,15 +194,11 @@ export class Room extends DurableObject {
 
   onState(p, msg, now) {
     if (!rateAllow(p.stateLimiter, now, STATE_MAX_PER_SEC)) return
-    const prevY = p.pos[1] || 0
-    const claimY = clampClaimY(msg.pos[1])
-    // 碰撞以客戶端回報的腳底高度判定(跳到桌面上就不被桌子擋);回報值已夾在合理範圍
-    const r = evaluateStateChange(p, { ...msg, pos: [msg.pos[0], claimY, msg.pos[2]] }, now)
+    // 先決定伺服器採用的腳底高度(支撐面 + 姿勢 + 滯空限制),碰撞也用這個高度判定,不用客戶端的原始值
+    const h = evaluateHeight(p, msg, now)
+    const r = evaluateStateChange(p, { ...msg, pos: [msg.pos[0], h.y, msg.pos[2]] }, now)
     p.lastStateAt = now
-    // 腳下支撐面(地板或桌 / 沙發頂面)決定高度的下限與跳躍上限,再套滯空時間限制
-    const ground = groundHeight(r.pos[0], r.pos[2], prevY)
-    const y = limitAirTime(p, sanitizeJumpY(claimY, r.pose, isDowned(p, now), ground), now, ground)
-    p.pos = [r.pos[0], y, r.pos[2]]
+    p.pos = [r.pos[0], r.correct ? h.prevY : h.y, r.pos[2]] // 移動被拒:留在原位也沿用原高度
     if (r.correct && now - p.lastCorrect >= CORRECT_MIN_INTERVAL_MS) {
       p.lastCorrect = now
       this.send(p.ws, { type: S2C.CORRECT, pos: p.pos, pose: r.pose })
@@ -227,7 +221,7 @@ export class Room extends DurableObject {
   onShoot(p, msg, now) {
     if (!cooldownReady(p, 'lastShoot', now, SHOOT_COOLDOWN_MS)) return
     if (isDowned(p, now)) return // 倒地不能射擊
-    if (!isShootOriginValid(msg.origin, p.pos)) return
+    if (!isShootOriginValid(msg.origin, p.pos, p.airSince > 0)) return
     // 坐著的人身體在椅子碰撞盒內:射線不被自己那張椅子擋住,否則坐下就等於無敵
     const seatedChairs = new Set(
       [...this.players.values()].filter((q) => q.pose === 'sit' && q.seatId).map((q) => seatById(q.seatId)?.chairId),

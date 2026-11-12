@@ -8,6 +8,8 @@ import {
   evaluateStateChange,
   createMoveBucket,
   limitAirTime,
+  evaluateHeight,
+  isShootOriginValid,
   JUMP_MAX_AIR_MS,
   HIT_DAMAGE,
   DOWN_DURATION_MS,
@@ -190,5 +192,67 @@ describe('standing on desks and sofas', () => {
       const bz = (box.min[2] + box.max[2]) / 2
       expect(isBlocked(bx, bz), box.id).toBe(true)
     }
+  })
+})
+
+describe('server-side height decisions', () => {
+  const onDeskXZ = [deskBox.max[0] - 0.15, 0, cz]
+
+  it('collision uses the sanitized height, so a forged huge height cannot walk through furniture', () => {
+    const p = mk({ pos: [-6, 0, 2.65] })
+    const h = evaluateHeight(p, { pos: [-6, 99, 2.65], pose: 'stand' }, 1000)
+    expect(h.y).toBeLessThanOrEqual(JUMP_REACH)
+    expect(h.y).toBeLessThanOrEqual(CLAIM_MAX_Y)
+  })
+
+  it('a forged height is clamped under the ceiling', () => {
+    const p = mk({ pos: [-6, 0, 2.65] })
+    expect(evaluateHeight(p, { pos: [-6, 50, 2.65], pose: 'stand' }, 1000).y).toBeLessThanOrEqual(CLAIM_MAX_Y)
+  })
+
+  it('after a forced landing the player can still stand on a desk (recorded y 0, reports 0.75)', () => {
+    const p = mk({ pos: [onDeskXZ[0], 0, onDeskXZ[2]] })
+    const h = evaluateHeight(p, { pos: [onDeskXZ[0], deskTop, onDeskXZ[2]], pose: 'stand' }, 5000)
+    expect(h.ground).toBe(deskTop)
+    expect(h.y).toBe(deskTop)
+    expect(p.airSince).toBe(0)
+  })
+
+  it('crouching while on a desk stays on the desk surface', () => {
+    const p = mk({ pos: [onDeskXZ[0], deskTop, onDeskXZ[2]] })
+    const h = evaluateHeight(p, { pos: [onDeskXZ[0], deskTop + 0.4, onDeskXZ[2]], pose: 'crouch' }, 1000)
+    expect(h.y).toBe(deskTop)
+  })
+
+  it('downed players are held to the support surface', () => {
+    const p = mk({ pos: [-6, 0, 2.65], hp: 0, downedUntil: 99999, pose: 'prone' })
+    expect(evaluateHeight(p, { pos: [-6, 0.8, 2.65], pose: 'stand' }, 1000).y).toBe(0)
+  })
+
+  it('shooting from standing on a desk or from the air is allowed; from the floor stays strict', () => {
+    const eye = PLAYER.eyeHeight.stand
+    expect(isShootOriginValid([cx, deskTop + eye, cz + 3], [cx, deskTop, cz + 3])).toBe(true)
+    expect(isShootOriginValid([-6, 0.2 + eye, 2.2], [-6, 0, 2.2])).toBe(false) // 貼地時不放寬
+    expect(isShootOriginValid([-6, 0.2 + eye, 2.2], [-6, 0, 2.2], true)).toBe(true) // 剛起跳
+  })
+})
+
+describe('falling into things you cannot stand on', () => {
+  it('a player embedded in a chair at any height is pushed out when resolved with zero movement', () => {
+    const chair = COLLIDERS.find((b) => b.id === CHAIRS[0].id)
+    const ccx = (chair.min[0] + chair.max[0]) / 2
+    const ccz = (chair.min[2] + chair.max[2]) / 2
+    for (const y of [0, 0.5, 1.0]) {
+      const out = moveCircle(ccx + 0.1, ccz, 0, 0, PLAYER.radius, y)
+      expect(isBlocked(out.x, out.z, PLAYER.radius - 0.01, y), `y=${y}`).toBe(false)
+    }
+  })
+
+  it('above the chair top (1.15m) it no longer blocks', () => {
+    const chair = COLLIDERS.find((b) => b.id === CHAIRS[0].id)
+    const ccx = (chair.min[0] + chair.max[0]) / 2
+    const ccz = (chair.min[2] + chair.max[2]) / 2
+    expect(isBlocked(ccx, ccz, PLAYER.radius, 1.1)).toBe(false)
+    expect(isBlocked(ccx, ccz, PLAYER.radius, 1.0)).toBe(true)
   })
 })
