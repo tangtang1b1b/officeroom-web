@@ -1,9 +1,26 @@
 import { Room } from './Room.js'
 import { isOriginAllowed, parseAllowedOrigins } from './rules.js'
+import { refreshWorkload } from './clickup.js'
 
 export { Room }
 
+// 排程抓 ClickUp 卡片數 → 交給房間廣播。失敗(token 失效、超過限速、網路錯誤)就保留上一次的資料。
+export async function runWorkloadRefresh(env, fetchFn = fetch) {
+  try {
+    const workload = await refreshWorkload(env, fetchFn)
+    await env.ROOM.get(env.ROOM.idFromName('main')).setWorkload(workload)
+    console.log('workload updated', JSON.stringify(workload.seats))
+  } catch (error) {
+    // 只記錯誤訊息,不記 token
+    console.error('workload refresh failed:', error?.message ?? String(error))
+  }
+}
+
 export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(runWorkloadRefresh(env))
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url)
     if (url.pathname === '/ws') {

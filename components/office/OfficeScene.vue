@@ -4,6 +4,7 @@ import { createRemotePlayers, IDLE_PREFIX } from '~/utils/office/remotePlayers.j
 import { PLAYER_COLORS, MAX_PLAYERS, MAX_HP } from '~/shared/protocol.js'
 import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
 import { createDog } from '~/utils/office/dog.js'
+import { createGhosts } from '~/utils/office/ghosts.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
 import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF, SEATS, seatSpot } from '~/shared/layout.js'
@@ -59,6 +60,7 @@ let controls
 let network
 let remotes
 let dog
+let ghosts
 let paint
 let gun
 let recoil = 0
@@ -481,6 +483,20 @@ const syncIdleSeats = () => {
   })
 }
 
+// 小幽靈要繞著誰飄:自己 → 控制器位置;在線的同事 → 他的人偶;離線的同事 → 座位上坐著的人偶。找不到就先不畫。
+const BODY_HEIGHT = { stand: 1.75, crouch: 1.3, prone: 0.4, sit: 1.3 }
+const anchorFor = (seatId) => {
+  if (seatId === props.seatId) {
+    const { x, y, z, pose } = controls.state
+    // 自己的幽靈拉開一點、且只飄在眼睛下方,不要擋住準心與視線
+    return { x, y, z, height: BODY_HEIGHT[pose], spread: 0.5, ceilY: y + PLAYER.eyeHeight[pose] - 0.45 }
+  }
+  const online = store.roster.find((r) => r.seatId === seatId)
+  const group = remotes.getGroup(online ? online.id : IDLE_PREFIX + seatId)
+  if (!group) return null
+  return { x: group.position.x, y: group.position.y, z: group.position.z, height: 1.5 }
+}
+
 const shoot = () => {
   if (!hoverHit || controls.state.downed) return
   const { state } = controls
@@ -523,6 +539,7 @@ const tick = () => {
 
   remotes.update(dt)
   dog?.update(dt)
+  ghosts?.update(dt, anchorFor)
   paint.update(dt)
   renderer.render(scene, camera)
 }
@@ -589,6 +606,8 @@ onMounted(() => {
 
   remotes = createRemotePlayers(scene)
   dog = createDog(scene)
+  ghosts = createGhosts(scene)
+  disposables.push({ dispose: () => ghosts.dispose() })
   disposables.push({ dispose: () => dog.dispose() })
   // 斑點附著的宿主:被打中的玩家
   paint = createPaint(scene, (msg) => {
@@ -597,7 +616,7 @@ onMounted(() => {
   })
 
   controls = usePlayerControls(renderer.domElement)
-  if (import.meta.dev) window.__office = { controls, remotes, get dog() { return dog } }
+  if (import.meta.dev) window.__office = { controls, remotes, get dog() { return dog }, get ghosts() { return ghosts }, get scene() { return scene } }
   disposables.push({ dispose: watch(controls.locked, (value) => (locked.value = value)) })
   renderer.domElement.addEventListener('mousedown', onCanvasDown)
   window.addEventListener('mousemove', onMouseMove)
@@ -633,6 +652,7 @@ onMounted(() => {
       remotes.applyState(player)
       syncIdleSeats()
     },
+    workload: (workload) => ghosts.setCounts(workload?.seats),
     playerLeave: (id) => {
       remotes.remove(id)
       syncIdleSeats()
@@ -749,6 +769,7 @@ onBeforeUnmount(() => {
       <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
         <div class="h-full rounded-full transition-all" :style="{ width: (hp / MAX_HP) * 100 + '%', background: hpColor }"></div>
       </div>
+      <p class="mt-1 text-[11px] text-neutral-500">👻 = 未完成卡片(紅色 = 逾期)</p>
       <p v-if="downSec > 0" class="mt-1 font-bold text-red-600">倒地中,只能爬行 · {{ downSec }} 秒後可起身</p>
     </div>
 

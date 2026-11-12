@@ -51,6 +51,7 @@ export const useNetwork = (handlers = {}) => {
         wasOnline = true
         retries = 0
         handlers.welcome?.(msg)
+        if (msg.workload) handlers.workload?.(msg.workload)
         break
       case S2C.PLAYER_JOIN:
         if (!msg.player) break
@@ -67,6 +68,9 @@ export const useNetwork = (handlers = {}) => {
       }
       case S2C.SNAPSHOT:
         handlers.snapshot?.(msg.players || [], msg.dog)
+        break
+      case S2C.WORKLOAD:
+        handlers.workload?.(msg.workload)
         break
       case S2C.CHAT:
         store.pushChat(msg.from, msg.text)

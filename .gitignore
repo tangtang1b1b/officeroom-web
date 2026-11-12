@@ -28,3 +28,8 @@ logs
 
 .vercel
 .env*
+
+# Cloudflare Worker 本機 secret(CLICKUP_TOKEN 等),不可提交
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

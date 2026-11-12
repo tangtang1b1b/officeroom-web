@@ -8,6 +8,8 @@ import { standUpSpot } from '../shared/collision.js'
 import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
 import { createDog, stepDog, publicDog } from './dog.js'
+
+const WORKLOAD_KEY = 'workload'
 import {
   checkAdmission,
   isIdle,
@@ -50,6 +52,10 @@ export class Room extends DurableObject {
     this.timer = null
     this.idleTimer = null
     this.downRecords = new Map() // recordKey -> { hp, downedUntil }
+    this.workload = null // { updatedAt, seats } 最近一次成功從 ClickUp 抓到的卡片數
+    ctx.blockConcurrencyWhile(async () => {
+      this.workload = (await ctx.storage.get(WORKLOAD_KEY)) ?? null
+    })
     this.dog = createDog(Date.now())
     this.dogAt = Date.now()
   }
@@ -60,6 +66,13 @@ export class Room extends DurableObject {
     this.downRecords.delete(key)
     if (!rec || rec.downedUntil <= Date.now()) return {}
     return rec
+  }
+
+  // 由排程(worker/index.js 的 scheduled)以 RPC 呼叫:存下新數字並通知所有人。
+  async setWorkload(workload) {
+    this.workload = workload
+    await this.ctx.storage.put(WORKLOAD_KEY, workload)
+    this.broadcast({ type: S2C.WORKLOAD, workload })
   }
 
   async fetch(request) {
@@ -177,6 +190,7 @@ export class Room extends DurableObject {
       you: { pos: session.pos, yaw: session.yaw, pose: session.pose, seatId: session.seatId, hp: session.hp },
       players: [...this.players.values()].map((q) => publicPlayer(q)),
       dog: publicDog(this.dog),
+      workload: this.workload,
     })
     this.broadcast({ type: S2C.PLAYER_JOIN, player: publicPlayer(session) }, session.id)
     this.startTimer()

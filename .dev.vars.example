@@ -1,0 +1,2 @@
+# 複製成 .dev.vars 使用(本機測試 Worker 用,不會被提交)
+CLICKUP_TOKEN=

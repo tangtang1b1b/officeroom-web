@@ -25,6 +25,7 @@ export const S2C = {
   PAINT: 'paint',
   CORRECT: 'correct',
   ERROR: 'error',
+  WORKLOAD: 'workload',
 }
 
 // 最終伺服器訊息格式(pos 皆為 [x,y,z]):
@@ -36,6 +37,7 @@ export const S2C = {
 // chat        { type, from:name, text }
 // paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, part? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
 // correct     { type, pos:[x,y,z], pose }  // 客戶端須同時套用 pose(坐姿時 pos 即座位中心)
+// workload    { type, workload:{ updatedAt, seats:{ [seatId]:{ open, overdue } } } }  // ClickUp 未完成卡片數(幽靈);welcome 也附帶 workload
 // error       { type, error }  // 含 'room full' | 'seat taken' | 'bad seat' | 'name reserved'(後三者伺服器隨即斷線 1008)
 // Player = { id, name, color, pos, yaw, pitch, pose, seatId, hp, down }  // seatId 訪客為 null;pos[1] 為跳躍高度;hp 0~MAX_HP;down 為倒地剩餘毫秒(0 = 沒倒地)
 
