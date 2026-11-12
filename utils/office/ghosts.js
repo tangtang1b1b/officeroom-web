@@ -1,12 +1,17 @@
 import * as THREE from 'three'
-import { ghostPlan } from '~/shared/workload.js'
+import { ghostPlan, fanAngle, fanSlot } from '~/shared/workload.js'
 
-// 小幽靈:一張未完成的 ClickUp 卡片 = 一隻,繞著那位同事飄。逾期的卡片是紅色幽靈。
-// 卡片越多,人被包圍得越緊(軌道半徑縮小、轉得更快),很多隻時整個人就被幽靈圍住。
-// 方塊風格(跟人偶、小白狗同一套);所有幽靈共用幾何與材質,只有位置不同。
+// 小幽靈:固定飄在那位同事「身後的扇形範圍」(左後、正後、右後),只做上下飄動。
+// 卡片 3 張以內各一隻白色;超過 3 張就每 3 張融合成 1 隻紅色(例:7 張 = 2 紅 + 1 白)。
+// 大小依 ClickUp 卡片的優先度:越急越大隻,最急的排在正後方(規則見 shared/workload.js 的 ghostPlan)。
+// 方塊風格(跟人偶、小白狗同一套);所有幽靈共用幾何與材質,只有位置、大小不同。
 const WHITE = 0xf4f7ff
-const RED = 0xff6b6b
+const RED = 0xff5a5a
 const DARK = 0x1a1a22
+
+const ROW_RADIUS = 0.95 // 第 0 排離人的距離
+const ROW_GAP = 0.45 // 每往外一排多出的距離
+const BOB = 0.13 // 上下飄動的幅度(公尺)
 
 export const createGhosts = (scene) => {
   const geometries = []
@@ -28,12 +33,12 @@ export const createGhosts = (scene) => {
   const eyeMat = new THREE.MeshBasicMaterial({ color: DARK })
   materials.push(eyeMat)
   const styles = {
-    normal: mat(WHITE, { transparent: true, opacity: 0.88 }),
-    overdue: mat(RED, { transparent: true, opacity: 0.92 }),
+    white: mat(WHITE, { transparent: true, opacity: 0.88 }),
+    red: mat(RED, { transparent: true, opacity: 0.92 }),
   }
 
-  const build = (kind) => {
-    const m = styles[kind]
+  const build = (red) => {
+    const m = red ? styles.red : styles.white
     const group = new THREE.Group()
     const add = (geometry, material, x, y, z) => {
       const mesh = new THREE.Mesh(geometry, material)
@@ -42,13 +47,13 @@ export const createGhosts = (scene) => {
       return mesh
     }
     add(bodyGeo, m, 0, 0.12, 0)
-    // 下擺的三角鋸齒
+    // 下擺的鋸齒
     add(skirtGeo, m, -0.065, 0.0, 0)
     add(skirtGeo, m, 0.065, 0.0, 0)
     add(skirtGeo, m, 0, -0.02, 0)
     add(armGeo, m, -0.13, 0.1, 0)
     add(armGeo, m, 0.13, 0.1, 0)
-    // 臉朝 -z(group 朝向移動方向)
+    // 臉朝 -z(group 朝向跟角色一樣,所以幽靈是「看著角色的背」)
     add(eyeGeo, eyeMat, -0.045, 0.16, -0.105)
     add(eyeGeo, eyeMat, 0.045, 0.16, -0.105)
     add(eyeGeo, eyeMat, 0, 0.08, -0.105).scale.set(1.6, 0.5, 1) // 嘴
@@ -56,23 +61,28 @@ export const createGhosts = (scene) => {
     return group
   }
 
-  // seatId → { ghosts: [{ group, kind, seed }], anchor: {x,y,z} }
+  // seatId → { maxScale, ghosts: [{ group, red, scale, seed, placed }] }
   const swarms = new Map()
   let time = 0
 
+  const clear = (swarm) => {
+    for (const g of swarm.ghosts) scene.remove(g.group)
+    swarm.ghosts = []
+  }
+
+  // plan: [{ red, scale }](由 ghostPlan 排好,第 0 隻最急);顏色變了就重建那一隻,數量變了只增減
   const resize = (swarm, plan) => {
-    const want = [...Array(plan.overdue).fill('overdue'), ...Array(plan.normal).fill('normal')]
-    // 種類或數量變了才重建對應的幽靈
-    while (swarm.ghosts.length > want.length) {
-      const g = swarm.ghosts.pop()
-      scene.remove(g.group)
-    }
-    want.forEach((kind, i) => {
+    while (swarm.ghosts.length > plan.length) scene.remove(swarm.ghosts.pop().group)
+    plan.forEach((want, i) => {
       const cur = swarm.ghosts[i]
-      if (cur && cur.kind === kind) return
+      if (cur && cur.red === want.red) {
+        cur.scale = want.scale
+        return
+      }
       if (cur) scene.remove(cur.group)
-      swarm.ghosts[i] = { group: build(kind), kind, seed: i * 1.7, placed: false }
+      swarm.ghosts[i] = { group: build(want.red), red: want.red, scale: want.scale, seed: i * 1.9, placed: false }
     })
+    swarm.maxScale = plan.reduce((m, g) => Math.max(m, g.scale), 1)
   }
 
   return {
@@ -81,23 +91,23 @@ export const createGhosts = (scene) => {
       const known = new Set(Object.keys(seats || {}))
       for (const [seatId, swarm] of swarms) {
         if (!known.has(seatId)) {
-          resize(swarm, { normal: 0, overdue: 0 })
+          clear(swarm)
           swarms.delete(seatId)
         }
       }
       for (const [seatId, c] of Object.entries(seats || {})) {
         let swarm = swarms.get(seatId)
         if (!swarm) {
-          swarm = { ghosts: [] }
+          swarm = { maxScale: 1, ghosts: [] }
           swarms.set(seatId, swarm)
         }
-        resize(swarm, ghostPlan(c.open, c.overdue))
+        resize(swarm, ghostPlan(c))
       }
     },
-    // anchorFor(seatId) → { x, y, z, height } | null(人不在場景裡就先不畫)
+    // anchorFor(seatId) → { x, y, z, yaw, height } | null(人不在場景裡就先不畫)。yaw=0 面向 -z。
     update(dt, anchorFor) {
       time += dt
-      const k = 1 - Math.exp(-6 * dt)
+      const k = 1 - Math.exp(-5 * dt)
       for (const [seatId, swarm] of swarms) {
         const anchor = anchorFor(seatId)
         const n = swarm.ghosts.length
@@ -105,16 +115,22 @@ export const createGhosts = (scene) => {
           const g = swarm.ghosts[i]
           g.group.visible = !!anchor
           if (!anchor) continue
-          // 越多隻:軌道越小、轉得越快,看起來越被「壓」著
-          const crowd = Math.min(1, n / 12)
-          const radius = 0.95 - 0.3 * crowd + (i % 3) * 0.16 + (anchor.spread ?? 0)
-          const speed = 0.7 + 0.9 * crowd
-          const angle = time * speed * (i % 2 ? 1 : -1) + (i * Math.PI * 2) / Math.max(n, 1)
-          const baseY = anchor.y + 0.35 + (anchor.height ?? 1.75) * 0.35
-          const tx = anchor.x + Math.cos(angle) * radius
-          const tz = anchor.z + Math.sin(angle) * radius
-          let ty = baseY + 0.3 * Math.sin(time * 1.4 + g.seed) + (i % 4) * 0.16
-          if (anchor.ceilY !== undefined) ty = Math.min(ty, anchor.ceilY) // 自己的幽靈不飄到眼睛高度以上,才不會擋視線
+          const { row } = fanSlot(i)
+          const yaw = anchor.yaw ?? 0
+          // 身後方向 = (sin yaw, cos yaw);再往左 / 右轉 angle 度
+          const a = (fanAngle(i, n) * Math.PI) / 180
+          const bx = Math.sin(yaw)
+          const bz = Math.cos(yaw)
+          const dx = bx * Math.cos(a) - bz * Math.sin(a)
+          const dz = bx * Math.sin(a) + bz * Math.cos(a)
+          // 越大隻離遠一點,才不會擠在一起
+          const radius = (ROW_RADIUS + row * ROW_GAP) * (1 + 0.35 * (swarm.maxScale - 1))
+          const tx = anchor.x + dx * radius
+          const tz = anchor.z + dz * radius
+          // 高度:大約在肩膀到頭的高度,往外的排稍微高一點;只有上下飄動
+          const ty = anchor.y + (anchor.height ?? 1.75) * 0.55 + row * 0.12 + 0.1 * g.scale + BOB * Math.sin(time * 1.6 + g.seed)
+          g.group.scale.setScalar(g.scale)
+          g.group.rotation.y = yaw // 臉朝角色(跟角色面向同一方向)
           if (!g.placed) {
             g.group.position.set(tx, ty, tz)
             g.placed = true
@@ -123,15 +139,11 @@ export const createGhosts = (scene) => {
             g.group.position.y += (ty - g.group.position.y) * k
             g.group.position.z += (tz - g.group.position.z) * k
           }
-          // 臉朝移動方向(軌道切線)
-          // 切線速度 = s·(-sin a, cos a);臉朝 -z,所以 rotation.y = atan2(-vx, -vz)
-          const s = i % 2 ? 1 : -1
-          g.group.rotation.y = Math.atan2(s * Math.sin(angle), -s * Math.cos(angle))
         }
       }
     },
     dispose() {
-      for (const swarm of swarms.values()) for (const g of swarm.ghosts) scene.remove(g.group)
+      for (const swarm of swarms.values()) clear(swarm)
       swarms.clear()
       geometries.forEach((g) => g.dispose())
       materials.forEach((m) => m.dispose())

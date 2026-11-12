@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeStatus, isCounted, countWorkload, ghostPlan, CLICKUP_USER_SEATS, MAX_GHOSTS, EXCLUDED_STATUSES } from '../shared/workload.js'
+import { normalizeStatus, isCounted, countWorkload, ghostPlan, CLICKUP_USER_SEATS, MAX_GHOSTS, PRIORITY_SCALE, EXCLUDED_STATUSES, fanAngle, fanSlot } from '../shared/workload.js'
 import { fetchOpenTasks, resolveTeamId, refreshWorkload } from '../worker/clickup.js'
 import { SEATS } from '../shared/layout.js'
 
@@ -44,7 +44,7 @@ describe('countWorkload', () => {
   it('maps the seven coworkers to seats and starts everyone at zero', () => {
     const out = countWorkload([], NOW)
     expect(Object.keys(out).sort()).toEqual(Object.values(CLICKUP_USER_SEATS).sort())
-    for (const v of Object.values(out)) expect(v).toEqual({ open: 0, overdue: 0 })
+    for (const v of Object.values(out)) expect(v).toEqual({ open: 0, overdue: 0, priority: { urgent: 0, high: 0, normal: 0, low: 0 } })
   })
 
   it('every mapped seat exists in the seat table with a name', () => {
@@ -61,7 +61,7 @@ describe('countWorkload', () => {
       task('qa ready 👀', [WILL], String(NOW - 1000)), // 排除狀態:不算(即使逾期)
       task('block', [WILL]),
     ]
-    expect(countWorkload(tasks, NOW)['seat-will']).toEqual({ open: 3, overdue: 1 })
+    expect(countWorkload(tasks, NOW)['seat-will']).toMatchObject({ open: 3, overdue: 1 })
   })
 
   it('a shared card counts for each assignee once; unknown users are ignored', () => {
@@ -72,23 +72,93 @@ describe('countWorkload', () => {
 
   it('handles missing assignees and bad due dates', () => {
     const out = countWorkload([{ status: 'new', assignees: undefined }, task('new', [WILL], 'abc')], NOW)
-    expect(out['seat-will']).toEqual({ open: 1, overdue: 0 })
+    expect(out['seat-will']).toMatchObject({ open: 1, overdue: 0 })
   })
 })
 
-describe('ghostPlan', () => {
-  it('one ghost per card, capped', () => {
-    expect(ghostPlan(0)).toEqual({ normal: 0, overdue: 0 })
-    expect(ghostPlan(3, 0)).toEqual({ normal: 3, overdue: 0 })
-    expect(ghostPlan(5, 2)).toEqual({ normal: 3, overdue: 2 })
-    expect(ghostPlan(99, 0)).toEqual({ normal: MAX_GHOSTS, overdue: 0 })
-    expect(ghostPlan(99, 99)).toEqual({ normal: 0, overdue: MAX_GHOSTS })
+describe('ghostPlan (fusing and priority size)', () => {
+  const reds = (plan) => plan.filter((g) => g.red).length
+  const whites = (plan) => plan.filter((g) => !g.red).length
+
+  it('3 cards or fewer: one white ghost each, normal size', () => {
+    expect(ghostPlan({ open: 0 })).toEqual([])
+    expect(ghostPlan({ open: 1 })).toEqual([{ red: false, scale: 1 }])
+    const three = ghostPlan({ open: 3 })
+    expect(three).toHaveLength(3)
+    expect(reds(three)).toBe(0)
   })
 
-  it('overdue ghosts never exceed the total, bad input is safe', () => {
-    expect(ghostPlan(2, 9)).toEqual({ normal: 0, overdue: 2 })
-    expect(ghostPlan(-4, 1)).toEqual({ normal: 0, overdue: 0 })
-    expect(ghostPlan(NaN, NaN)).toEqual({ normal: 0, overdue: 0 })
+  it('over 3 cards fuses every 3 into one red; the rest stay white (7 cards = 2 red + 1 white)', () => {
+    const seven = ghostPlan({ open: 7 })
+    expect(reds(seven)).toBe(2)
+    expect(whites(seven)).toBe(1)
+    const shapes = [4, 5, 6, 9].map((n) => ghostPlan({ open: n })).map((p) => [reds(p), whites(p)])
+    expect(shapes).toEqual([
+      [1, 1],
+      [1, 2],
+      [2, 0],
+      [3, 0],
+    ])
+  })
+
+  it('reds come first, then whites', () => {
+    const plan = ghostPlan({ open: 8 })
+    expect(plan.map((g) => g.red)).toEqual([true, true, false, false])
+  })
+
+  it('size follows priority: urgent > high > normal > low', () => {
+    const one = (key) => ghostPlan({ open: 1, priority: { [key]: 1 } })[0].scale
+    expect(one('urgent')).toBeGreaterThan(one('high'))
+    expect(one('high')).toBeGreaterThan(one('normal'))
+    expect(one('normal')).toBeGreaterThan(one('low'))
+  })
+
+  it('the most urgent cards are fused first, so the first red ghost is the biggest; low ones end up as small whites', () => {
+    const plan = ghostPlan({ open: 7, priority: { urgent: 2, high: 0, normal: 3, low: 2 } })
+    expect(plan[0]).toEqual({ red: true, scale: PRIORITY_SCALE.urgent }) // urgent, urgent, normal
+    expect(plan[1]).toEqual({ red: true, scale: PRIORITY_SCALE.normal }) // normal, normal, low
+    expect(plan[2]).toEqual({ red: false, scale: PRIORITY_SCALE.low }) // 剩下最不急的一張
+  })
+
+  it('a fused ghost is sized by the most urgent card in its group', () => {
+    const plan = ghostPlan({ open: 6, priority: { urgent: 1, high: 1, normal: 2, low: 2 } })
+    expect(plan[0].scale).toBe(PRIORITY_SCALE.urgent)
+    expect(plan[1].scale).toBe(PRIORITY_SCALE.normal)
+  })
+
+  it('missing or mismatched priority data counts as normal (also for old saved data and plain numbers)', () => {
+    expect(ghostPlan({ open: 4 })[0].scale).toBe(1)
+    expect(ghostPlan({ open: 5, priority: { urgent: 1 } })[0].scale).toBe(PRIORITY_SCALE.urgent)
+    expect(reds(ghostPlan(7))).toBe(2)
+  })
+
+  it('never draws more than the cap, keeping reds first', () => {
+    const plan = ghostPlan({ open: 99 })
+    expect(plan).toHaveLength(MAX_GHOSTS)
+    expect(reds(plan)).toBe(MAX_GHOSTS)
+  })
+
+  it('bad input is safe', () => {
+    expect(ghostPlan({ open: -4 })).toEqual([])
+    expect(ghostPlan({ open: NaN })).toEqual([])
+    expect(ghostPlan(undefined)).toEqual([])
+  })
+})
+
+describe('priority counting', () => {
+  it('reads ClickUp priority objects; no priority counts as normal', () => {
+    const mk = (priority) => ({ status: 'in progress', assignees: [{ id: WILL }], priority })
+    const out = countWorkload(
+      [mk({ id: '1', priority: 'urgent' }), mk({ id: '2', priority: 'High' }), mk({ id: '3', priority: 'low' }), mk(null), mk(undefined), mk({ priority: 'weird' })],
+      NOW,
+    )
+    expect(out['seat-will'].priority).toEqual({ urgent: 1, high: 1, normal: 3, low: 1 })
+    expect(out['seat-will'].open).toBe(6)
+  })
+
+  it('excluded-status cards do not add to priority counts', () => {
+    const out = countWorkload([{ status: 'qa ready 👀', assignees: [{ id: WILL }], priority: { priority: 'urgent' } }], NOW)
+    expect(out['seat-will'].priority.urgent).toBe(0)
   })
 })
 
@@ -166,5 +236,32 @@ describe('ClickUp fetching', () => {
     expect(out.updatedAt).toBe(NOW)
     expect(out.seats['seat-will'].open).toBe(1)
     expect(JSON.stringify(out)).not.toContain('SECRET-TOKEN')
+  })
+})
+
+describe('ghost fan layout (behind the character)', () => {
+  it('three ghosts take left-back, back and right-back; the first (most urgent) sits right behind', () => {
+    expect([0, 1, 2].map((i) => fanAngle(i, 3))).toEqual([0, -60, 60])
+  })
+
+  it('a single ghost sits right behind; two spread left and right', () => {
+    expect(fanAngle(0, 1)).toBe(0)
+    const two = [fanAngle(0, 2), fanAngle(1, 2)]
+    expect(two[0]).toBeLessThan(0)
+    expect(two[1]).toBeGreaterThan(0)
+  })
+
+  it('all angles stay within the rear fan (never in front of the character)', () => {
+    for (let n = 1; n <= MAX_GHOSTS; n++) {
+      for (let i = 0; i < n; i++) expect(Math.abs(fanAngle(i, n))).toBeLessThanOrEqual(65)
+    }
+  })
+
+  it('rows are used in order and 12 ghosts fit in three rows', () => {
+    expect(fanSlot(0).row).toBe(0)
+    expect(fanSlot(2).row).toBe(0)
+    expect(fanSlot(3).row).toBe(1)
+    expect(fanSlot(7).row).toBe(2)
+    expect(fanSlot(MAX_GHOSTS - 1).row).toBe(2)
   })
 })

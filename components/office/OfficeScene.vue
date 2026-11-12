@@ -487,14 +487,13 @@ const syncIdleSeats = () => {
 const BODY_HEIGHT = { stand: 1.75, crouch: 1.3, prone: 0.4, sit: 1.3 }
 const anchorFor = (seatId) => {
   if (seatId === props.seatId) {
-    const { x, y, z, pose } = controls.state
-    // 自己的幽靈拉開一點、且只飄在眼睛下方,不要擋住準心與視線
-    return { x, y, z, height: BODY_HEIGHT[pose], spread: 0.5, ceilY: y + PLAYER.eyeHeight[pose] - 0.45 }
+    const { x, y, z, yaw, pose } = controls.state
+    return { x, y, z, yaw, height: BODY_HEIGHT[pose] } // 幽靈在身後,自己看不到(轉頭才會看到)
   }
   const online = store.roster.find((r) => r.seatId === seatId)
   const group = remotes.getGroup(online ? online.id : IDLE_PREFIX + seatId)
   if (!group) return null
-  return { x: group.position.x, y: group.position.y, z: group.position.z, height: 1.5 }
+  return { x: group.position.x, y: group.position.y, z: group.position.z, yaw: group.rotation.y, height: 1.5 }
 }
 
 const shoot = () => {
@@ -769,7 +768,7 @@ onBeforeUnmount(() => {
       <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
         <div class="h-full rounded-full transition-all" :style="{ width: (hp / MAX_HP) * 100 + '%', background: hpColor }"></div>
       </div>
-      <p class="mt-1 text-[11px] text-neutral-500">👻 = 未完成卡片(紅色 = 逾期)</p>
+      <p class="mt-1 text-[11px] text-neutral-500">👻 在身後 = 未完成卡片(每 3 張融合成 1 隻紅色,越優先越大)</p>
       <p v-if="downSec > 0" class="mt-1 font-bold text-red-600">倒地中,只能爬行 · {{ downSec }} 秒後可起身</p>
     </div>
 
