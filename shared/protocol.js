@@ -1,6 +1,6 @@
 // 前後端共用的訊息協定(JSON)。pos 為腳底位置 [x,y,z](y=0 為地面)。
 
-export const MAX_PLAYERS = 7
+export const MAX_PLAYERS = 10
 // 玩家顏色(伺服器依序分配,在線玩家不重複);前端的外型也依序號決定,所以每個人的上衣顏色都不同
 export const PLAYER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
 export const MAX_NAME_LENGTH = 16

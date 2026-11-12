@@ -45,6 +45,11 @@ export class Room extends DurableObject {
   }
 
   async fetch(request) {
+    // 登入頁用:目前被人佔用(上班中)的座位 id
+    if (new URL(request.url).pathname === '/seats') {
+      const seats = [...this.players.values()].map((p) => p.seatId).filter(Boolean)
+      return Response.json({ seats })
+    }
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 })
     }

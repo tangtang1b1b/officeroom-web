@@ -28,7 +28,7 @@ const STATUS_TEXT = {
   name_reserved: '這個名稱屬於座位上的同事,請「登出」後從名單選自己的名字',
   connecting: '連線中…',
   reconnecting: '連線中斷,重新連線中…',
-  full: '辦公室已滿(最多 7 人),會自動重試…',
+  full: `辦公室已滿(最多 ${MAX_PLAYERS} 人),會自動重試…`,
   failed: '無法連線到伺服器,請重新整理頁面',
 }
 const statusText = computed(() => STATUS_TEXT[store.netStatus] || '')

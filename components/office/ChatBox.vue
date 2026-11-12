@@ -1,4 +1,6 @@
 <script setup>
+import { MAX_PLAYERS } from '~/shared/protocol.js'
+
 const props = defineProps({
   messages: { type: Array, default: () => [] },
   roster: { type: Array, default: () => [] },
@@ -81,7 +83,7 @@ defineExpose({ open, close, isOpen })
     <header class="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
       <div>
         <p class="font-bold">辦公室聊天室</p>
-        <p class="text-xs text-neutral-500">線上 {{ roster.length }} / 7</p>
+        <p class="text-xs text-neutral-500">線上 {{ roster.length }} / {{ MAX_PLAYERS }}</p>
       </div>
       <button class="rounded-full px-2 py-1 text-lg leading-none text-neutral-500 hover:bg-neutral-100" title="關閉" @click="close">
         ×
