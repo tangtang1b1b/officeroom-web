@@ -694,7 +694,7 @@ onMounted(() => {
       const onHit = () => {
         if (disposed) return
         if (msg.targetId !== store.myId) paint.addSplat(msg)
-        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color || PAINT_RED) }
+        else if (downSec.value <= 0) hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color || PAINT_RED) }
       }
       if (origin) paint.addProjectile(origin, msg.pos, msg.color, onHit)
       else onHit()
@@ -743,7 +743,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative h-screen w-screen overflow-hidden bg-black">
-    <div ref="host" class="absolute inset-0" :class="hovering ? 'cursor-pointer' : ''"></div>
+    <div
+      ref="host"
+      class="absolute inset-0 transition-[filter] duration-500"
+      :class="[hovering ? 'cursor-pointer' : '', downSec > 0 ? 'grayscale' : '']"
+    ></div>
 
     <div v-if="locked && !hovering" class="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"></div>
     <!-- 準心或游標指到別的玩家時,在游標位置顯示瞄準圈 -->
@@ -775,12 +779,13 @@ onBeforeUnmount(() => {
     </p>
 
     <!-- 血量低於 50%:畫面紅閃 -->
-    <div v-if="lowHp" class="low-hp pointer-events-none absolute inset-0"></div>
+    <div v-if="lowHp && downSec <= 0" class="low-hp pointer-events-none absolute inset-0"></div>
 
-    <!-- 倒地時顯示復活倒數 -->
-    <p v-if="downSec > 0" class="pointer-events-none absolute left-4 top-20 rounded-xl bg-red-600/90 px-3 py-2 text-xs font-bold text-white shadow">
-      倒地中,只能爬行 · {{ downSec }} 秒後起身
-    </p>
+    <!-- 倒地時顯示復活倒數(畫面中間偏上,畫面轉黑白) -->
+    <div v-if="downSec > 0" class="pointer-events-none absolute left-1/2 top-[18%] -translate-x-1/2 text-center text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.8)]">
+      <p class="text-lg font-bold tracking-widest">復活倒數</p>
+      <p class="text-7xl font-black leading-none">{{ downSec }}</p>
+    </div>
 
     <!-- 左下:漆彈顏色 -->
     <div class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow">
