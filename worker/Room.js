@@ -5,9 +5,9 @@
 import { DurableObject } from 'cloudflare:workers'
 import { SPAWN_POINTS, COLLIDERS, SEATS, seatById, seatSpot } from '../shared/layout.js'
 import { standUpSpot } from '../shared/collision.js'
-import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
+import { MAX_PLAYERS, MAX_HP, PLAYER_COLORS, PAINT_COLORS, C2S, S2C, parseClientMessage, encode } from '../shared/protocol.js'
 import { raycastWorld } from '../shared/raycast.js'
-import { createDog, stepDog, publicDog } from './dog.js'
+import { createDog, stepDog, nudgeDog, publicDog } from './dog.js'
 
 const WORKLOAD_KEY = 'workload'
 import {
@@ -251,7 +251,8 @@ export class Room extends DurableObject {
       seatedChairs.add(seat.chairId)
     }
     const hit = raycastWorld(msg.origin, msg.dir, {
-      players: [...this.players.values(), ...idleDolls],
+      // 狗也可以被打(id 'dog',不在 this.players,所以只噴漆、不扣血)
+      players: [...this.players.values(), ...idleDolls, { id: 'dog', pos: [this.dog.x, 0, this.dog.z], pose: 'dog', yaw: this.dog.yaw }],
       boxes: COLLIDERS.filter((box) => !seatedChairs.has(box.id)),
       ignoreId: p.id,
       maxDist: MAX_SHOT_DIST,
@@ -264,7 +265,7 @@ export class Room extends DurableObject {
       origin: msg.origin,
       pos: hit.point,
       normal: hit.normal,
-      color: p.color,
+      color: msg.color ?? PAINT_COLORS[0],
     }
     paint.targetId = hit.targetId
     if (hit.part) paint.part = hit.part
@@ -273,6 +274,7 @@ export class Room extends DurableObject {
     const target = this.players.get(hit.targetId)
     // 倒地狀態由快照(hp/down)通知,不送 CORRECT,避免把畫面拉回落後的伺服器位置
     if (target) applyHit(target, now)
+    else if (hit.targetId === 'dog') nudgeDog(this.dog, msg.dir, now) // 狗只被推一下,不扣血
   }
 
   drop(session, code, reason) {

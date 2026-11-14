@@ -1,7 +1,7 @@
 <script setup>
 import * as THREE from 'three'
 import { createRemotePlayers, IDLE_PREFIX } from '~/utils/office/remotePlayers.js'
-import { PLAYER_COLORS, MAX_PLAYERS, MAX_HP } from '~/shared/protocol.js'
+import { PLAYER_COLORS, MAX_PLAYERS, MAX_HP, PAINT_COLORS } from '~/shared/protocol.js'
 import { createPaint, PAINT_RED } from '~/utils/office/paint.js'
 import { createDog } from '~/utils/office/dog.js'
 import { createGhosts } from '~/utils/office/ghosts.js'
@@ -25,7 +25,9 @@ const poseLabel = ref('站立')
 const hitFlash = ref({ key: 0, color: '#ffffff' })
 const hp = ref(MAX_HP)
 const downSec = ref(0) // 倒地剩餘秒數(0 = 沒倒地)
-const hpColor = computed(() => (hp.value > MAX_HP * 0.5 ? '#3ddc84' : hp.value > MAX_HP * 0.25 ? '#ffc107' : '#ff4d4f'))
+const lowHp = computed(() => hp.value < MAX_HP * 0.5) // 低於 50%:畫面紅閃(不顯示血量數字)
+const paintColor = ref(PAINT_COLORS[0]) // 目前選的漆彈顏色
+const showHelp = ref(true) // 進遊戲先跳說明彈窗,關閉後才開始操控
 // 伺服器通知自己的血量與倒地狀態(welcome 與每次快照)
 const applySelf = (player) => {
   if (typeof player.hp !== 'number') return
@@ -34,7 +36,12 @@ const applySelf = (player) => {
   downSec.value = Math.ceil(down / 1000)
   const downed = down > 0
   if (downed && !controls.state.downed) controls.state.pose = 'prone'
+  else if (!downed && controls.state.downed) controls.state.pose = 'stand' // 重生時間到:自動站起來
   controls.state.downed = downed
+}
+const closeHelp = () => {
+  showHelp.value = false
+  controls?.requestLock() // 按鈕點擊是使用者手勢,可直接進入視角操控
 }
 const POSE_LABELS = { stand: '站立', crouch: '蹲下', prone: '趴下', sit: '坐著' }
 const STATUS_TEXT = {
@@ -446,6 +453,10 @@ const updateHover = () => {
       candidates.push(mesh)
     }
   }
+  for (const mesh of dog?.group.userData.bodyMeshes || []) {
+    owners.set(mesh, 'dog')
+    candidates.push(mesh)
+  }
   if (candidates.length) {
     for (const mesh of staticMeshes) candidates.push(mesh)
     raycaster.setFromCamera(pointer, camera)
@@ -504,7 +515,7 @@ const shoot = () => {
   const dir = hoverHit.point.clone().sub(origin)
   if (dir.lengthSq() < 1e-6) return
   dir.normalize()
-  network.sendShoot([origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z])
+  network.sendShoot([origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z], paintColor.value)
   recoil = 1
 }
 
@@ -574,7 +585,7 @@ const resetPointer = () => {
 // 瀏覽器規定 Esc 一定會解除滑鼠鎖定,無法攔截;游標照常顯示,並讓任何移動鍵立刻重新鎖定
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'])
 const onKeyRelock = (event) => {
-  if (controls.locked.value || chatBox.value?.isOpen) return
+  if (showHelp.value || controls.locked.value || chatBox.value?.isOpen) return
   if (event.target instanceof HTMLElement && event.target.tagName === 'INPUT') return
   if (MOVE_KEYS.has(event.code)) controls.requestLock()
 }
@@ -610,6 +621,7 @@ onMounted(() => {
   disposables.push({ dispose: () => dog.dispose() })
   // 斑點附著的宿主:被打中的玩家
   paint = createPaint(scene, (msg) => {
+    if (msg.targetId === 'dog') return dog?.group ?? null
     if (msg.targetId) return remotes.getGroup(msg.targetId)
     return null
   })
@@ -682,7 +694,7 @@ onMounted(() => {
       const onHit = () => {
         if (disposed) return
         if (msg.targetId !== store.myId) paint.addSplat(msg)
-        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(PAINT_RED) }
+        else hitFlash.value = { key: hitFlash.value.key + 1, color: colorCss(msg.color || PAINT_RED) }
       }
       if (origin) paint.addProjectile(origin, msg.pos, msg.color, onHit)
       else onHit()
@@ -762,14 +774,42 @@ onBeforeUnmount(() => {
       <template v-else>🎯 漆彈對戰 · 線上 {{ store.roster.length }}/{{ MAX_PLAYERS }} · {{ poseLabel }}</template>
     </p>
 
-    <!-- 左上下方:自己的血量;倒地時顯示復活倒數 -->
-    <div class="pointer-events-none absolute left-4 top-20 w-40 rounded-xl bg-white/90 px-3 py-2 text-xs text-neutral-700 shadow">
-      <div class="mb-1 flex justify-between"><span>❤ 血量</span><b>{{ hp }}</b></div>
-      <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
-        <div class="h-full rounded-full transition-all" :style="{ width: (hp / MAX_HP) * 100 + '%', background: hpColor }"></div>
+    <!-- 血量低於 50%:畫面紅閃 -->
+    <div v-if="lowHp" class="low-hp pointer-events-none absolute inset-0"></div>
+
+    <!-- 倒地時顯示復活倒數 -->
+    <p v-if="downSec > 0" class="pointer-events-none absolute left-4 top-20 rounded-xl bg-red-600/90 px-3 py-2 text-xs font-bold text-white shadow">
+      倒地中,只能爬行 · {{ downSec }} 秒後起身
+    </p>
+
+    <!-- 左下:漆彈顏色 -->
+    <div class="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 shadow">
+      <span class="text-xs text-neutral-600">漆彈</span>
+      <button
+        v-for="c in PAINT_COLORS"
+        :key="c"
+        type="button"
+        class="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110"
+        :class="paintColor === c ? 'scale-110 border-neutral-900 ring-2 ring-white' : 'border-white'"
+        :style="{ background: c }"
+        :aria-label="'漆彈顏色 ' + c"
+        @click="paintColor = c"
+      ></button>
+    </div>
+
+    <!-- 進遊戲後的說明彈窗:關閉後才開始操控 -->
+    <div v-if="showHelp" class="absolute inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 text-sm text-neutral-700 shadow-xl">
+        <h2 class="mb-3 text-lg font-bold text-neutral-900">🎯 漆彈對戰 · 玩法說明</h2>
+        <ul class="flex flex-col gap-2">
+          <li>🖱 點擊畫面進入視角,對準同事點擊開槍(按住連射)</li>
+          <li>⌨ WASD 移動 · 空白 跳 · C 蹲 · Z 趴 · Enter 聊天 · Esc 解除滑鼠</li>
+          <li>🎨 左下角可選漆彈顏色</li>
+          <li>💥 被打中血量會減少,低於一半時畫面會紅閃;血量歸零就倒地,只能爬行,時間到會自動站起來</li>
+          <li>👻 同事身後的小幽靈 = 未完成的 ClickUp 卡片(每 3 張融合成 1 隻紅色,越優先越大)</li>
+        </ul>
+        <button type="button" class="mt-5 w-full rounded-full bg-yellow-400 px-5 py-2 font-bold text-black hover:bg-yellow-300" @click="closeHelp">我知道了,開始!</button>
       </div>
-      <p class="mt-1 text-[11px] text-neutral-500">👻 在身後 = 未完成卡片(每 3 張融合成 1 隻紅色,越優先越大)</p>
-      <p v-if="downSec > 0" class="mt-1 font-bold text-red-600">倒地中,只能爬行 · {{ downSec }} 秒後可起身</p>
     </div>
 
     <!-- 右上:連線、人數、暱稱、登出 -->
@@ -808,6 +848,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.low-hp {
+  background: radial-gradient(circle, transparent 35%, rgba(255, 0, 0, 0.55) 130%);
+  animation: low-hp-blink 0.9s ease-in-out infinite;
+}
+@keyframes low-hp-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 .hit-flash {
   background: radial-gradient(circle, transparent 40%, var(--hit-color) 130%);
   animation: hit-fade 0.6s ease-out forwards;

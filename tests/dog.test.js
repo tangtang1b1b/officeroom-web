@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createDog, stepDog, pickTarget, DOG_RADIUS, DOG_SPEED, publicDog } from '../worker/dog.js'
+import { createDog, stepDog, nudgeDog, pickTarget, DOG_RADIUS, DOG_SPEED, publicDog } from '../worker/dog.js'
 import { isBlocked } from '../shared/collision.js'
 
 // 簡單可重現的亂數
@@ -63,5 +63,22 @@ describe('dog wandering', () => {
   it('public format is small and numeric', () => {
     const p = publicDog(createDog(0))
     expect(Object.keys(p).sort()).toEqual(['moving', 'yaw', 'z', 'x'].sort())
+  })
+})
+
+describe('dog nudge', () => {
+  it('is pushed a little along the shot direction and stops to idle', () => {
+    const dog = createDog(0, { x: 4, z: 2.2 })
+    dog.moving = true
+    nudgeDog(dog, [0, 0, 1], 1000)
+    expect(dog.z).toBeGreaterThan(2.2)
+    expect(dog.z - 2.2).toBeLessThan(0.5)
+    expect(dog.moving).toBe(false)
+    expect(isBlocked(dog.x, dog.z, DOG_RADIUS)).toBe(false)
+  })
+  it('ignores a purely vertical shot', () => {
+    const dog = createDog(0, { x: 4, z: 2.2 })
+    nudgeDog(dog, [0, 1, 0], 0)
+    expect([dog.x, dog.z]).toEqual([4, 2.2])
   })
 })

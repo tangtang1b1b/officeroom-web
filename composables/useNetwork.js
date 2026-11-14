@@ -142,7 +142,7 @@ export const useNetwork = (handlers = {}) => {
     },
     sendState: (pos, yaw, pitch, pose) => send({ type: C2S.STATE, pos, yaw, pitch, pose }),
     sendChat: (text) => send({ type: C2S.CHAT, text }),
-    sendShoot: (origin, dir) => send({ type: C2S.SHOOT, origin, dir }),
+    sendShoot: (origin, dir, color) => send({ type: C2S.SHOOT, origin, dir, color }),
     disconnect() {
       closed = true
       clearTimeout(retryTimer)

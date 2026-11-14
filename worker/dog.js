@@ -69,5 +69,19 @@ export function stepDog(dog, now, dtMs, rand = Math.random) {
   return dog
 }
 
+// 被漆彈打中:沿射擊方向(水平)被推一小段,遇到牆或家具就停在原地。dir 為射擊單位向量。
+export const DOG_NUDGE = 0.25
+export function nudgeDog(dog, dir, now) {
+  const len = Math.hypot(dir[0], dir[2])
+  if (len < 1e-6) return dog // 垂直射擊:不推
+  const next = moveCircle(dog.x, dog.z, (dir[0] / len) * DOG_NUDGE, (dir[2] / len) * DOG_NUDGE, DOG_RADIUS)
+  dog.x = next.x
+  dog.z = next.z
+  // 被嚇到:停下來發呆一下,再繼續逛
+  dog.moving = false
+  dog.until = Math.max(dog.until, now + 1200)
+  return dog
+}
+
 // 廣播用的公開格式
 export const publicDog = (dog) => ({ x: +dog.x.toFixed(3), z: +dog.z.toFixed(3), yaw: +dog.yaw.toFixed(3), moving: dog.moving })

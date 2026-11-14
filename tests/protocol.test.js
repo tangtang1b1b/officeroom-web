@@ -42,6 +42,12 @@ describe('protocol', () => {
     expect(p({ type: 'shoot', origin: [0, 1.6, 0], dir: [0, 0, 0] }).ok).toBe(false)
     expect(p({ type: 'shoot', origin: [0, 1.6], dir: [0, 0, 1] }).ok).toBe(false)
   })
+  it('shoot only accepts whitelisted paint colors', () => {
+    const base = { type: 'shoot', origin: [0, 1.6, 0], dir: [0, 0, 1] }
+    expect(p({ ...base, color: '#1e90ff' }).msg.color).toBe('#1e90ff')
+    expect(p({ ...base, color: 'url(evil)' }).msg.color).toBeUndefined()
+    expect(p(base).msg.color).toBeUndefined()
+  })
   it('clamps pitch and normalizes yaw', () => {
     const r = p({ type: 'state', pos: [0, 0, 0], yaw: 7 * Math.PI, pitch: 9, pose: 'stand' })
     expect(r.msg.pitch).toBe(1.5)

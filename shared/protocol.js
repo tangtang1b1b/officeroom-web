@@ -3,6 +3,8 @@
 export const MAX_PLAYERS = 10
 // 玩家顏色(伺服器依序分配,在線玩家不重複);前端的外型也依序號決定,所以每個人的上衣顏色都不同
 export const PLAYER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990']
+// 漆彈可選顏色(白名單;第一個為預設紅)。伺服器只接受清單內的值
+export const PAINT_COLORS = ['#d91e1e', '#ff8a00', '#ffd400', '#2ecc40', '#1e90ff', '#b13cff', '#ff5ca8', '#222222']
 export const MAX_HP = 100
 export const MAX_NAME_LENGTH = 16
 export const MAX_CHAT_LENGTH = 200
@@ -35,7 +37,8 @@ export const S2C = {
 // player_leave{ type, id }
 // snapshot    { type, players:[Player] }
 // chat        { type, from:name, text }
-// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color, targetId?, part? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
+// shoot(C2S)  { type, origin, dir, color? }  // color ∈ PAINT_COLORS,漆彈顏色
+// paint       { type, from:id, origin:[x,y,z], pos:[x,y,z], normal:[x,y,z], color(漆彈色), targetId?, part? }  // part: head|torso|armL|armR|legL|legR(命中玩家時)
 // correct     { type, pos:[x,y,z], pose }  // 客戶端須同時套用 pose(坐姿時 pos 即座位中心)
 // workload    { type, workload:{ updatedAt, seats:{ [seatId]:{ open, overdue } } } }  // ClickUp 未完成卡片數(幽靈);welcome 也附帶 workload
 // error       { type, error }  // 含 'room full' | 'seat taken' | 'bad seat' | 'name reserved'(後三者伺服器隨即斷線 1008)
@@ -106,10 +109,10 @@ export function validateClientMessage(data) {
       if (!isVec3(data.dir)) return fail('bad dir')
       const len = Math.hypot(...data.dir)
       if (len < 1e-6) return fail('bad dir')
-      return {
-        ok: true,
-        msg: { type: C2S.SHOOT, origin: [...data.origin], dir: data.dir.map((n) => n / len) },
-      }
+      const msg = { type: C2S.SHOOT, origin: [...data.origin], dir: data.dir.map((n) => n / len) }
+      // color 選填;不在白名單就當作沒帶(用預設色),不拒絕整發
+      if (typeof data.color === 'string' && PAINT_COLORS.includes(data.color)) msg.color = data.color
+      return { ok: true, msg }
     }
     default:
       return fail('unknown type')

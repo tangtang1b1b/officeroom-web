@@ -106,7 +106,12 @@ function buildHitParts() {
     torso: box(-tw, tw, 0, pH, legH, torsoTop),
     ...sym('leg', B.legX, lw, 0, B.legD, 0, legH),
   }
-  return { stand, crouch, prone, sit }
+  // 小白狗(縮放後約 0.4m 高):身體含腿與尾巴、頭;只用來擋射線與吃漆彈,不會受傷
+  const dog = {
+    torso: box(-0.11, 0.11, 0, 0.37, -0.24, 0.16),
+    head: box(-0.1, 0.1, 0.2, 0.4, 0.12, 0.32),
+  }
+  return { stand, crouch, prone, sit, dog }
 }
 
 export const HIT_PARTS = buildHitParts()

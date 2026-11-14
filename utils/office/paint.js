@@ -204,8 +204,8 @@ export const createPaint = (scene, getHost) => {
     const onBody = msg.targetId && host ? locateOnBody(msg, host) : null
     const pos = onBody ? onBody.point.toArray() : msg.pos
     const normal = onBody ? onBody.normal.toArray() : msg.normal
-    const material = materialFor(PAINT_RED)
-    const n = new THREE.Vector3(...normal).normalize()
+    const material = materialFor(msg.color || PAINT_RED)
+    const n =new THREE.Vector3(...normal).normalize()
     // 往外推一點,讓投影盒中心落在表面外側而非剛好貼面
     const p = [pos[0] + n.x * 0.005, pos[1] + n.y * 0.005, pos[2] + n.z * 0.005]
 
@@ -245,7 +245,7 @@ export const createPaint = (scene, getHost) => {
   const balls = []
   const ballGeometry = new THREE.SphereGeometry(0.035, 10, 8)
   const addProjectile = (origin, end, color, onHit) => {
-    const mesh = new THREE.Mesh(ballGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(PAINT_RED) }))
+    const mesh = new THREE.Mesh(ballGeometry, new THREE.MeshBasicMaterial({ color: new THREE.Color(color || PAINT_RED) }))
     const from = new THREE.Vector3(...origin)
     const to = new THREE.Vector3(...end)
     mesh.position.copy(from)

@@ -202,3 +202,12 @@ describe('sit pose', () => {
     expect(raycastPlayer([2, 1.6, 0], [0, 0, 1], P, 'sit', 50)).toBeNull()
   })
 })
+
+describe('dog hit parts', () => {
+  it('shot at the dog hits it as a player-kind target', async () => {
+    const { raycastWorld } = await import('../shared/raycast.js')
+    const hit = raycastWorld([0, 0.25, 3], [0, 0, -1], { players: [{ id: 'dog', pos: [0, 0, 0], pose: 'dog', yaw: 0 }] })
+    expect(hit.kind).toBe('player')
+    expect(hit.targetId).toBe('dog')
+  })
+})
