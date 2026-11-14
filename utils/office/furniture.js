@@ -150,15 +150,19 @@ export const buildDesk = (group, desk, k) => {
 
   // 黃色隔板與螢幕:位置由 layout 計算,與碰撞資料一致
   k.box(group, [PARTITION.w, PARTITION.h, PARTITION.d], [0, h + PARTITION.h / 2, partitionLocalZ(desk)], FURNITURE_COLOR.yellow)
+  // 螢幕整組放進獨立 Group(原點在底座中心的桌面上),可單獨播放被射倒的動畫;回傳給呼叫端
   const monZ = monitorLocalZ(desk)
-  const monY = h + MONITOR.y
-  k.box(group, [MONITOR.w, MONITOR.h, MONITOR.d], [0, monY, monZ], 0x111111)
-  k.box(group, [MONITOR.w - 0.04, MONITOR.h - 0.04, 0.004], [0, monY, monZ + outer * (MONITOR.d / 2 + 0.002)], 0x1b3550, {
+  const monitor = new THREE.Group()
+  monitor.position.set(0, h, monZ)
+  group.add(monitor)
+  const monY = MONITOR.y // 相對桌面
+  k.box(monitor, [MONITOR.w, MONITOR.h, MONITOR.d], [0, monY, 0], 0x111111)
+  k.box(monitor, [MONITOR.w - 0.04, MONITOR.h - 0.04, 0.004], [0, monY, outer * (MONITOR.d / 2 + 0.002)], 0x1b3550, {
     extra: { emissive: 0x2a5b8a, emissiveIntensity: 0.5 },
   })
-  const neckH = monY - MONITOR.h / 2 - h
-  k.box(group, [0.06, neckH, 0.03], [0, h + neckH / 2, monZ], FURNITURE_COLOR.steelDark)
-  k.box(group, [0.24, 0.012, 0.16], [0, h + 0.006, monZ], FURNITURE_COLOR.steelDark)
+  const neckH = monY - MONITOR.h / 2
+  k.box(monitor, [0.06, neckH, 0.03], [0, neckH / 2, 0], FURNITURE_COLOR.steelDark)
+  k.box(monitor, [0.24, 0.012, 0.16], [0, 0.006, 0], FURNITURE_COLOR.steelDark)
 
   // 鍵盤與滑鼠
   k.box(group, [0.42, 0.02, 0.14], [0, h + 0.01, outer * 0.2], 0x2b2d31)
@@ -173,6 +177,7 @@ export const buildDesk = (group, desk, k) => {
   } else if (pick < 0.8) {
     k.cyl(group, [0.035, 0.03, 0.09, 8], [w / 2 - 0.15, h + 0.045, inner * 0.2], 0xf2f2ee)
   }
+  return { monitor }
 }
 
 const BOOK_COLORS = [0xb5483a, 0x3f6e9c, 0xd8b25a, 0x5d8a5b, 0x7b5a99, 0xe8e2d0, 0x2f3a4a, 0xc77d3c]

@@ -16,7 +16,9 @@ const isTyping = (target) =>
 
 // 第一人稱操控:點畫面後滑鼠鎖定,移動滑鼠即轉視角,準心在畫面中央;WASD 移動、C 蹲 / Z 趴。
 // Esc(瀏覽器規定會解除鎖定)只是讓游標出現以便點按鈕,WASD 仍可移動,遊戲不暫停;點畫面再鎖定。
-export const usePlayerControls = (element) => {
+// disabled:被射走物品的碰撞疊加層 { has(id), boxes }(同 shared/props.js 的 propsOverlay,呼叫端原地更新):
+// 原位盒視同不存在、被打飛物品目前位置的盒會擋人,與伺服器一致以免被拉回
+export const usePlayerControls = (element, disabled = null) => {
   const spawn = SPAWN_POINTS[Math.floor(Math.random() * SPAWN_POINTS.length)]
   const state = {
     x: spawn.x,
@@ -63,7 +65,7 @@ export const usePlayerControls = (element) => {
   const update = (dt) => {
     if (state.downed) state.pose = 'prone'
     // 腳下的支撐面(地板或桌 / 沙發頂面)
-    let ground = groundHeight(state.x, state.z, state.y)
+    let ground = groundHeight(state.x, state.z, state.y, disabled)
     const grounded = state.y <= ground + EPS && state.vy <= 0
     if (grounded) {
       state.y = ground
@@ -75,7 +77,7 @@ export const usePlayerControls = (element) => {
       const prevY = state.y
       state.vy -= GRAVITY * dt
       state.y += state.vy * dt
-      ground = groundHeight(state.x, state.z, prevY)
+      ground = groundHeight(state.x, state.z, prevY, disabled)
       if (state.y <= ground && state.vy <= 0) {
         state.y = ground // 落在地板或桌 / 沙發頂面上
         state.vy = 0
@@ -86,7 +88,7 @@ export const usePlayerControls = (element) => {
       }
     }
     // 高度每幀都在變:即使沒按方向鍵也要把嵌進方塊的身體推出(例如從桌緣掉下來、從上方落進櫃子)
-    const unstuck = moveCircle(state.x, state.z, 0, 0, PLAYER.radius, state.y)
+    const unstuck = moveCircle(state.x, state.z, 0, 0, PLAYER.radius, state.y, disabled)
     state.x = unstuck.x
     state.z = unstuck.z
     let forward = 0
@@ -107,7 +109,7 @@ export const usePlayerControls = (element) => {
     const dx = ((-sin * forward + cos * strafe) / length) * speed * dt
     const dz = ((-cos * forward - sin * strafe) / length) * speed * dt
     // 圓形碰撞:被擋時沿障礙物表面滑動(含斜牆與方塊轉角)
-    const next = moveCircle(state.x, state.z, dx, dz, PLAYER.radius, state.y)
+    const next = moveCircle(state.x, state.z, dx, dz, PLAYER.radius, state.y, disabled)
     state.x = next.x
     state.z = next.z
     state.speed = speed

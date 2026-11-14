@@ -28,7 +28,11 @@ export const S2C = {
   CORRECT: 'correct',
   ERROR: 'error',
   WORKLOAD: 'workload',
+  PROP_KNOCK: 'prop_knock',
+  PROP_RESTORE: 'prop_restore',
 }
+
+export const PROP_KINDS = ['chair', 'monitor', 'table']
 
 // 最終伺服器訊息格式(pos 皆為 [x,y,z]):
 // join(C2S)   { type, name, seatId? }  // seatId 選填(≤32 字元);有 seatId 時伺服器以座位表的名字為準
@@ -42,6 +46,12 @@ export const S2C = {
 // correct     { type, pos:[x,y,z], pose }  // 客戶端須同時套用 pose(坐姿時 pos 即座位中心)
 // workload    { type, workload:{ updatedAt, seats:{ [seatId]:{ open, overdue } } } }  // ClickUp 未完成卡片數(幽靈);welcome 也附帶 workload
 // error       { type, error }  // 含 'room full' | 'seat taken' | 'bad seat' | 'name reserved'(後三者伺服器隨即斷線 1008)
+// prop_knock  { type, from:id, prop:PropState }  // 椅子/螢幕被射中(含再射):prop 為射中當下的狀態(已帶新衝量,moving = true)
+// prop_restore{ type, ids:[propId] }             // 這些物品回到原位(到期、座位主人上線/離線、坐下)
+// welcome 與 snapshot 另附 props:[PropState](目前離開原位的全部物品,移動中與靜止都有;空陣列 = 全在原位)
+// PropState = { id, kind:'chair'|'monitor'|'table', pos:[x,y,z], yaw, tilt, moving, remainingMs }
+//   id 為碰撞盒 id(chair-xxx / desk-xxx-monitor / reception-chair-w|e|s(kind chair)/ round-table(kind table));pos 的 xz 為物品中心、y 為底面高度;yaw 與 layout 同義;
+//   tilt 為倒下角度(0 = 直立,π/2 = 倒下/躺平);moving = 伺服器仍在模擬;remainingMs 為距離回原位的毫秒
 // Player = { id, name, color, pos, yaw, pitch, pose, seatId, hp, down }  // seatId 訪客為 null;pos[1] 為跳躍高度;hp 0~MAX_HP;down 為倒地剩餘毫秒(0 = 沒倒地)
 
 export const MAX_PITCH = 1.5
@@ -141,8 +151,34 @@ export function parseServerMessage(raw) {
     return fail('bad json')
   }
   if (!isObject(data) || !Object.values(S2C).includes(data.type)) return fail('unknown type')
+  if (data.type === S2C.PROP_KNOCK && !isPropState(data.prop)) return fail('bad prop')
+  if (data.type === S2C.PROP_RESTORE && !(Array.isArray(data.ids) && data.ids.every((id) => typeof id === 'string'))) return fail('bad prop')
+  // welcome / snapshot 的 props 選填;格式不對只丟掉該欄位,不丟整則訊息
+  if ((data.type === S2C.WELCOME || data.type === S2C.SNAPSHOT) && data.props !== undefined && !isPropStateList(data.props)) {
+    delete data.props
+  }
   return { ok: true, msg: data }
 }
+
+// PropState 形狀檢查(客戶端收 prop_knock / welcome / snapshot 用)
+const MAX_PROP_ID_LENGTH = 64
+const MAX_PROPS = 256
+export const isPropState = (p) =>
+  isObject(p) &&
+  typeof p.id === 'string' &&
+  p.id.length > 0 &&
+  p.id.length <= MAX_PROP_ID_LENGTH &&
+  PROP_KINDS.includes(p.kind) &&
+  isVec3(p.pos) &&
+  p.pos.every((n) => Math.abs(n) <= COORD_LIMIT) &&
+  isFiniteNum(p.yaw) &&
+  isFiniteNum(p.tilt) &&
+  Math.abs(p.tilt) <= Math.PI &&
+  typeof p.moving === 'boolean' &&
+  isFiniteNum(p.remainingMs) &&
+  p.remainingMs >= 0
+
+export const isPropStateList = (v) => Array.isArray(v) && v.length <= MAX_PROPS && v.every(isPropState)
 
 export const encode = (msg) => JSON.stringify(msg)
 

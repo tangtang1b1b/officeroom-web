@@ -7,7 +7,9 @@ import { createDog } from '~/utils/office/dog.js'
 import { createGhosts } from '~/utils/office/ghosts.js'
 import { useAllStore } from '~/store/all.js'
 import { createFurnitureKit, buildDesk, buildFixture, buildOfficeChair } from '~/utils/office/furniture.js'
-import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF, SEATS, seatSpot } from '~/shared/layout.js'
+import { createProps } from '~/utils/office/props.js'
+import { monitorPropId, FIXTURE_PROP_IDS } from '~/shared/props.js'
+import { ROOM, PLAYER, DESKS, WALLS, FIXTURES, CHAIRS, WINDOWS, ENTRANCE_DOOR, WALL_SLANT, minZAt, GLASS_WALL, ENTRANCE_ZONE, END_WINDOW, DOOR_LEAF, SEATS, seatSpot, seatById } from '~/shared/layout.js'
 
 const props = defineProps({
   nickname: { type: String, default: '' },
@@ -78,6 +80,7 @@ let hoverHit = null // { point, id }
 let staticMeshes = []
 const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
+const knocked = createProps() // 可被射走的椅子與螢幕(knocked.disabled = 碰撞疊加層 { has, boxes })
 const owners = new Map()
 const candidates = []
 let pointerInside = false
@@ -375,21 +378,31 @@ const buildFurniture = () => {
   // 桌椅與固定家具的建模在 utils/office/furniture.js;尺寸與碰撞方塊一致,資源由 kit 統一釋放
   const kit = createFurnitureKit({ paintable: true })
   disposables.push(kit)
-  for (const f of FIXTURES) buildFixture(scene, f, kit)
+  for (const f of FIXTURES) {
+    const fixture = buildFixture(scene, f, kit)
+    // 會客室椅子與圓桌可被射走:交給物品管理(以家具中心底面為軸)
+    if (FIXTURE_PROP_IDS.includes(f.id)) {
+      if (f.id === 'round-table') knocked.addTable(f.id, fixture)
+      else knocked.addChair(f.id, fixture)
+    }
+  }
   // 椅子與紙箱:固定擺設(不被推動、不會倒),碰撞方塊在 shared/layout.js
+  // 辦公椅與螢幕可被射飛:交給 utils/office/props.js 管位置插值、回復動畫與碰撞疊加層
   for (const chair of CHAIRS) {
     const group = new THREE.Group()
     group.position.set(chair.x, 0, chair.z)
     group.rotation.y = chair.yaw // 椅子面向桌子
     buildOfficeChair(group, { materials: kit })
     scene.add(group)
+    knocked.addChair(chair.id, group)
   }
   for (const desk of DESKS) {
     const group = new THREE.Group()
     group.position.set(desk.x, 0, desk.z)
     group.rotation.y = desk.yaw || 0
-    buildDesk(group, desk, kit)
+    const { monitor } = buildDesk(group, desk, kit)
     scene.add(group)
+    knocked.addMonitor(monitorPropId(desk.id), monitor)
   }
 }
 
@@ -435,6 +448,21 @@ const resize = () => {
   camera.updateProjectionMatrix()
 }
 
+// 有人坐著的椅子 id:線上坐著的玩家(含自己)與離線同事人偶(與伺服器的判斷一致)
+const seatedPose = new Map() // 遠端玩家 id → 最近一次收到的 pose
+const seatedChairIds = () => {
+  const ids = new Set()
+  const online = new Set()
+  for (const r of store.roster) {
+    if (!r.seatId) continue
+    online.add(r.seatId)
+    const sitting = r.id === store.myId ? controls?.state.pose === 'sit' : seatedPose.get(r.id) === 'sit'
+    if (sitting) ids.add(seatById(r.seatId)?.chairId)
+  }
+  for (const seat of SEATS) if (seat.name && !online.has(seat.id)) ids.add(seat.chairId)
+  return ids
+}
+
 // 從游標位置射出射線,找出最前面的玩家(被牆或家具擋住就算沒指到)
 const updateHover = () => {
   hoverHit = null
@@ -455,6 +483,11 @@ const updateHover = () => {
   }
   for (const mesh of dog?.group.userData.bodyMeshes || []) {
     owners.set(mesh, 'dog')
+    candidates.push(mesh)
+  }
+  // 椅子與螢幕(含被打飛、停在場上的):可以瞄準,也會正確遮擋後面的人;有人坐的椅子不是目標
+  for (const { mesh, id } of knocked.hoverMeshes(seatedChairIds())) {
+    owners.set(mesh, id)
     candidates.push(mesh)
   }
   if (candidates.length) {
@@ -548,6 +581,7 @@ const tick = () => {
   gun.rotation.x = recoil * 0.12
 
   remotes.update(dt)
+  knocked.update(dt)
   dog?.update(dt)
   ghosts?.update(dt, anchorFor)
   paint.update(dt)
@@ -610,7 +644,7 @@ onMounted(() => {
   buildFurniture()
   staticMeshes = []
   scene.traverse((o) => {
-    if (o.isMesh && o.userData.paintable === true) staticMeshes.push(o)
+    if (o.isMesh && o.userData.paintable === true && !o.userData.propId) staticMeshes.push(o) // 椅子與螢幕由 knocked 管理
   })
   buildViewmodel()
 
@@ -626,7 +660,7 @@ onMounted(() => {
     return null
   })
 
-  controls = usePlayerControls(renderer.domElement)
+  controls = usePlayerControls(renderer.domElement, knocked.disabled)
   if (import.meta.dev) window.__office = { controls, remotes, get dog() { return dog }, get ghosts() { return ghosts }, get scene() { return scene } }
   disposables.push({ dispose: watch(controls.locked, (value) => (locked.value = value)) })
   renderer.domElement.addEventListener('mousedown', onCanvasDown)
@@ -649,33 +683,44 @@ onMounted(() => {
       }
       // 重連或伺服器重啟後 id 可能重新編號,先清掉舊的遠端玩家再重建
       remotes.dispose()
+      seatedPose.clear()
       dog.apply(msg.dog)
       if (msg.you) applySelf({ hp: msg.you.hp, down: 0 })
       for (const player of msg.players || []) {
-        if (player.id !== store.myId && player.pos) remotes.applyState(player)
+        if (player.id !== store.myId && player.pos) {
+          remotes.applyState(player)
+          seatedPose.set(player.id, player.pose)
+        }
       }
       syncIdleSeats()
       paint.clear()
+      knocked.apply(msg.props || [], { instant: true }) // 上線那次直接是目前狀態,不播動畫
     },
+    propKnock: (prop) => knocked.knock(prop),
+    propRestore: (ids) => knocked.restore(ids),
     playerJoin: (player) => {
       if (player.id === store.myId || !player.pos) return
       remotes.remove(player.id) // 同 id 的舊資料(名字、顏色)不能沿用
       remotes.applyState(player)
+      seatedPose.set(player.id, player.pose)
       syncIdleSeats()
     },
     workload: (workload) => ghosts.setCounts(workload?.seats),
     playerLeave: (id) => {
       remotes.remove(id)
+      seatedPose.delete(id)
       syncIdleSeats()
     },
-    snapshot: (players, dogState) => {
+    snapshot: (players, dogState, knockedProps) => {
       dog.apply(dogState)
+      if (Array.isArray(knockedProps)) knocked.apply(knockedProps) // 冪等:只處理與本地的差異
       const present = new Set()
       for (const player of players) {
         if (player.id === store.myId) applySelf(player)
         if (player.id === store.myId || !player.pos) continue
         present.add(player.id)
         remotes.applyState(player)
+        seatedPose.set(player.id, player.pose)
       }
       // 快照中已不存在的玩家(例如斷線期間離開)移除
       for (const id of remotes.liveIds()) {
@@ -733,6 +778,7 @@ onBeforeUnmount(() => {
   controls?.dispose()
   remotes?.dispose()
   paint?.dispose()
+  knocked.dispose()
   disposables.forEach((item) => item.dispose())
   if (import.meta.dev) delete window.__office
   renderer?.dispose()
@@ -811,6 +857,7 @@ onBeforeUnmount(() => {
           <li>⌨ WASD 移動 · 空白 跳 · C 蹲 · Z 趴 · Enter 聊天 · Esc 解除滑鼠</li>
           <li>🎨 左下角可選漆彈顏色</li>
           <li>💥 被打中血量會減少,低於一半時畫面會紅閃;血量歸零就倒地,只能爬行,時間到會自動站起來</li>
+          <li>🪑 椅子和螢幕可以被射飛(有人坐著的椅子除外),會留在原地擋路、可以再射,過一陣子自己滑回原位</li>
           <li>👻 同事身後的小幽靈 = 未完成的 ClickUp 卡片(每 3 張融合成 1 隻紅色,越優先越大)</li>
         </ul>
         <button type="button" class="mt-5 w-full rounded-full bg-yellow-400 px-5 py-2 font-bold text-black hover:bg-yellow-300" @click="closeHelp">我知道了,開始!</button>

@@ -1,6 +1,6 @@
 // 伺服器規則的純函式(不依賴 Durable Object,方便單元測試)。時間單位:毫秒。
-import { ROOM, PLAYER, COLLIDERS, SEATS, seatSpot } from '../shared/layout.js'
-import { isBlocked, groundHeight } from '../shared/collision.js'
+import { ROOM, PLAYER, SEATS, seatSpot } from '../shared/layout.js'
+import { isBlocked, groundHeight, activeColliders } from '../shared/collision.js'
 import { MAX_HP } from '../shared/protocol.js'
 
 export const MOVE_SPEED_FACTOR = 1.3
@@ -126,7 +126,8 @@ export function createMoveBucket(now) {
 
 // player: { pos, pose, move }。依「目前記錄的姿勢」補充額度,消耗實際水平位移。
 // 回傳 { ok, reason?, pos? };只有 ok 時才消耗額度,但任何情況都會補充並更新時間。
-export function evaluateMove(player, newPos, now) {
+// disabled:可選的停用碰撞盒 id 集合(被射走的物品),原樣傳給 isBlocked。
+export function evaluateMove(player, newPos, now, disabled = null) {
   const bucket = player.move
   const dt = Math.max(0, (now - bucket.at) / 1000)
   bucket.at = now
@@ -135,7 +136,7 @@ export function evaluateMove(player, newPos, now) {
 
   const dist = Math.hypot(newPos[0] - player.pos[0], newPos[2] - player.pos[2])
   if (dist > bucket.budget) return { ok: false, reason: 'speed' }
-  if (isBlocked(newPos[0], newPos[2], PLAYER.radius - COLLISION_RADIUS_TOLERANCE, newPos[1] || 0)) {
+  if (isBlocked(newPos[0], newPos[2], PLAYER.radius - COLLISION_RADIUS_TOLERANCE, newPos[1] || 0, disabled)) {
     return { ok: false, reason: 'blocked' }
   }
   bucket.budget -= dist
@@ -145,15 +146,39 @@ export function evaluateMove(player, newPos, now) {
 // 伺服器採用的腳底高度:先算新位置腳下的支撐面(參考高度取「上次記錄」與「回報值,最多比上次高一個跳躍」的較大者,
 // 這樣被強制落地後仍能正確站回桌面),再依姿勢 / 倒地 / 滯空時間得到高度。
 // 碰撞判定用這個高度,而不是客戶端回報的原始值,避免用假高度穿過家具。
-export function evaluateHeight(player, msg, now) {
+export function evaluateHeight(player, msg, now, disabled = null) {
   const prevY = player.pos[1] || 0
   const claimY = clampClaimY(msg.pos[1])
   const downed = isDowned(player, now)
   const pose = downed ? 'prone' : msg.pose
   const ref = Math.max(prevY, Math.min(claimY, prevY + JUMP_REACH))
-  const ground = groundHeight(msg.pos[0], msg.pos[2], ref)
+  const ground = groundHeight(msg.pos[0], msg.pos[2], ref, disabled)
   const y = limitAirTime(player, sanitizeJumpY(claimY, pose, downed, ground), now, ground)
   return { y, ground, prevY }
+}
+
+// ---- 被移下圓桌後的保護期 ----
+// 伺服器把站在桌上的人移到地板(dropPlayersOffProp)後,客戶端在收到 CORRECT 前送出的舊 state
+// (還在桌上、y > 0)會把人放回空中,讓移動中的桌子提早被擋停。保護期內這類 state 一律忽略(不回 CORRECT,避免洗版)。
+export const DROP_GUARD_MS = 300
+
+// 記錄保護期:area 為物品原位碰撞盒({ min, max })
+export function setDropGuard(player, area, now) {
+  player.dropGuard = { until: now + DROP_GUARD_MS, min: [...area.min], max: [...area.max] }
+}
+
+// 這筆 state 是否為保護期內的舊位置:在原位範圍內(水平放寬玩家半徑)且腳底高於地板。過期的保護自動清除。
+export function isStaleDropState(player, msg, now) {
+  const g = player.dropGuard
+  if (!g) return false
+  if (now >= g.until) {
+    player.dropGuard = null
+    return false
+  }
+  const [x, y, z] = msg.pos
+  if (!(y > 0)) return false
+  const r = PLAYER.radius
+  return x >= g.min[0] - r && x <= g.max[0] + r && z >= g.min[2] - r && z <= g.max[2] + r
 }
 
 // 訪客名稱是否與座位表的員工名衝突(不分大小寫)
@@ -164,7 +189,7 @@ export function isNameReserved(name) {
 
 // 狀態更新規則(含坐姿)。player: { pos, pose, seatId, move }。
 // 回傳 { pos, pose, yaw, pitch, correct };correct 為 true 表示應回傳 CORRECT(由呼叫端節流,內容為 pos)。
-export function evaluateStateChange(player, msg, now) {
+export function evaluateStateChange(player, msg, now, disabled = null) {
   reviveIfReady(player, now)
   // 倒地中只能趴著(不能蹲、起身)
   if (isDowned(player, now) && msg.pose !== 'prone') msg = { ...msg, pose: 'prone' }
@@ -181,7 +206,7 @@ export function evaluateStateChange(player, msg, now) {
     if (!ok) return { ...base, pos: player.pos, pose: player.pose, correct: true }
     return { ...base, pos: [spot.x, 0, spot.z], pose: 'sit', correct: false }
   }
-  const result = evaluateMove(player, msg.pos, now)
+  const result = evaluateMove(player, msg.pos, now, disabled)
   if (player.pose === 'sit') {
     // 起身:失敗則留在座位
     if (!result.ok) return { ...base, pos: player.pos, pose: 'sit', correct: true }
@@ -192,8 +217,8 @@ export function evaluateStateChange(player, msg, now) {
 
 // 選出生點:優先不與固定碰撞方塊重疊的候選,離現有玩家最遠者;全部重疊時退回不考慮方塊。
 // points: [{x,z}];playerPositions: [[x,y,z]]
-export function pickSpawnPoint(points, playerPositions) {
-  const free = points.filter((sp) => !isBlocked(sp.x, sp.z, PLAYER.radius))
+export function pickSpawnPoint(points, playerPositions, disabled = null) {
+  const free = points.filter((sp) => !isBlocked(sp.x, sp.z, PLAYER.radius, 0, disabled))
   const candidates = free.length > 0 ? free : points
   let best = candidates[0]
   let bestScore = -1
@@ -215,7 +240,9 @@ const insideBox = (p, box) =>
   p[2] >= box.min[2] && p[2] <= box.max[2]
 
 // pos: 伺服器記錄的玩家位置 [x,_,z]。水平距離寬鬆,y 限制在趴/站眼高範圍內。
-export function isShootOriginValid(origin, pos, airborne = false) {
+// disabled:可選的碰撞疊加層(停用 id 的 Set / 陣列,或 shared/props.js 的 propsOverlay):
+// 被停用的方塊不算「射出點在方塊內」,疊加層的額外盒(移動後的物品)則算。
+export function isShootOriginValid(origin, pos, airborne = false, disabled = null) {
   if (Math.hypot(origin[0] - pos[0], origin[2] - pos[2]) > MAX_SHOOT_ORIGIN_HORIZ) return false
   const base = pos[1] || 0 // 站在桌上 / 跳起來時,眼睛高度要加上腳底高度
   const lag = base > 0 || airborne ? SHOOT_ORIGIN_AIR_LAG : 0 // 貼地時維持嚴格;離地 / 在桌上 / 剛起跳時容許高度落後
@@ -225,7 +252,7 @@ export function isShootOriginValid(origin, pos, airborne = false) {
   if (origin[0] < ROOM.minX || origin[0] > ROOM.maxX) return false
   if (origin[1] < 0 || origin[1] > ROOM.height) return false
   if (origin[2] < ROOM.minZ || origin[2] > ROOM.maxZ) return false
-  return !COLLIDERS.some((box) => insideBox(origin, box))
+  return !activeColliders(disabled).some((box) => insideBox(origin, box))
 }
 
 // 出生朝向:面向房間中心(yaw=0 朝 -z)

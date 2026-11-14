@@ -82,3 +82,28 @@ describe('dog nudge', () => {
     expect([dog.x, dog.z]).toEqual([4, 2.2])
   })
 })
+
+describe('dog vs knocked props (collision overlay)', () => {
+  // 狗正前方(+z)0.3m 處一個被打飛停下的物品盒
+  const overlayAt = (x, z) => ({
+    has: () => false,
+    boxes: [{ id: 'chair-x', min: [x - 0.25, 0, z + 0.25], max: [x + 0.25, 0.6, z + 0.75], standable: false }],
+  })
+  it('nudge stops at a knocked prop', () => {
+    const dog = createDog(0, { x: 4, z: 2.2 })
+    const ov = overlayAt(4, 2.2)
+    for (let i = 0; i < 5; i++) nudgeDog(dog, [0, 0, 1], 1000, ov)
+    expect(isBlocked(dog.x, dog.z, DOG_RADIUS - 0.01, 0, ov)).toBe(false)
+    expect(dog.z).toBeLessThan(2.2 + 0.25)
+  })
+  it('never picks a target inside a knocked prop and never walks into one', () => {
+    const rand = seeded(7)
+    const dog = createDog(0)
+    const ov = overlayAt(dog.x, dog.z)
+    for (let t = 0; t < 60_000; t += 50) {
+      stepDog(dog, t, 50, rand, ov)
+      expect(isBlocked(dog.x, dog.z, DOG_RADIUS - 0.01, 0, ov)).toBe(false)
+      if (dog.moving) expect(isBlocked(dog.tx, dog.tz, DOG_RADIUS, 0, ov)).toBe(false)
+    }
+  })
+})

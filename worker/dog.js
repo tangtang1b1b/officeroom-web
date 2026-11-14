@@ -1,5 +1,6 @@
 // 辦公室裡的小白狗:伺服器模擬,所有人看到同一隻、同一個位置。純函式,方便單元測試。
 // 狗的行為:發呆一下 → 挑附近一個沒被擋住的點 → 走過去 → 再發呆。走不到(被擋/太久)就放棄換一個。
+// disabled:可選的碰撞疊加層(shared/props.js 的 propsOverlay),讓狗避開被打飛、停在場上的椅子與螢幕。
 import { isBlocked, moveCircle } from '../shared/collision.js'
 
 export const DOG_RADIUS = 0.18
@@ -22,22 +23,28 @@ export const createDog = (now = 0, start = DOG_START) => ({
 const randRange = (rand, [lo, hi]) => lo + (hi - lo) * rand()
 
 // 在目前位置附近挑一個沒被擋住的目標點;挑不到回 null
-export function pickTarget(dog, rand = Math.random) {
+export function pickTarget(dog, rand = Math.random, disabled = null) {
   for (let i = 0; i < 12; i++) {
     const angle = rand() * Math.PI * 2
     const dist = randRange(rand, WANDER_RANGE)
     const tx = dog.x + Math.sin(angle) * dist
     const tz = dog.z + Math.cos(angle) * dist
-    if (!isBlocked(tx, tz, DOG_RADIUS)) return { tx, tz }
+    if (!isBlocked(tx, tz, DOG_RADIUS, 0, disabled)) return { tx, tz }
   }
   return null
 }
 
 // 前進一步(dtMs 毫秒)。回傳同一個 dog 物件(原地更新)。
-export function stepDog(dog, now, dtMs, rand = Math.random) {
+export function stepDog(dog, now, dtMs, rand = Math.random, disabled = null) {
+  // 被打飛的物品停在狗身上(物品不和狗碰撞):先把狗推出來
+  if (disabled && isBlocked(dog.x, dog.z, DOG_RADIUS, 0, disabled)) {
+    const out = moveCircle(dog.x, dog.z, 0, 0, DOG_RADIUS, 0, disabled)
+    dog.x = out.x
+    dog.z = out.z
+  }
   if (!dog.moving) {
     if (now < dog.until) return dog
-    const target = pickTarget(dog, rand)
+    const target = pickTarget(dog, rand, disabled)
     if (!target) {
       dog.until = now + randRange(rand, IDLE_MS)
       return dog
@@ -57,7 +64,7 @@ export function stepDog(dog, now, dtMs, rand = Math.random) {
   // yaw=0 面向 -z(與人偶一致)
   dog.yaw = Math.atan2(-dx, -dz)
   const move = Math.min(step, dist)
-  const next = moveCircle(dog.x, dog.z, (dx / dist) * move, (dz / dist) * move, DOG_RADIUS)
+  const next = moveCircle(dog.x, dog.z, (dx / dist) * move, (dz / dist) * move, DOG_RADIUS, 0, disabled)
   const moved = Math.hypot(next.x - dog.x, next.z - dog.z)
   dog.x = next.x
   dog.z = next.z
@@ -71,10 +78,10 @@ export function stepDog(dog, now, dtMs, rand = Math.random) {
 
 // 被漆彈打中:沿射擊方向(水平)被推一小段,遇到牆或家具就停在原地。dir 為射擊單位向量。
 export const DOG_NUDGE = 0.25
-export function nudgeDog(dog, dir, now) {
+export function nudgeDog(dog, dir, now, disabled = null) {
   const len = Math.hypot(dir[0], dir[2])
   if (len < 1e-6) return dog // 垂直射擊:不推
-  const next = moveCircle(dog.x, dog.z, (dir[0] / len) * DOG_NUDGE, (dir[2] / len) * DOG_NUDGE, DOG_RADIUS)
+  const next = moveCircle(dog.x, dog.z, (dir[0] / len) * DOG_NUDGE, (dir[2] / len) * DOG_NUDGE, DOG_RADIUS, 0, disabled)
   dog.x = next.x
   dog.z = next.z
   // 被嚇到:停下來發呆一下,再繼續逛

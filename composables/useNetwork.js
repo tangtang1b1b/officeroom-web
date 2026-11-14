@@ -67,7 +67,13 @@ export const useNetwork = (handlers = {}) => {
         break
       }
       case S2C.SNAPSHOT:
-        handlers.snapshot?.(msg.players || [], msg.dog)
+        handlers.snapshot?.(msg.players || [], msg.dog, msg.props)
+        break
+      case S2C.PROP_KNOCK:
+        handlers.propKnock?.(msg.prop)
+        break
+      case S2C.PROP_RESTORE:
+        handlers.propRestore?.(msg.ids)
         break
       case S2C.WORKLOAD:
         handlers.workload?.(msg.workload)
